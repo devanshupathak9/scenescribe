@@ -1,6 +1,10 @@
 node_modules
+npm-debug.log
 .env
 .env.*
 !.env.example
-uploads/*
-!uploads/.gitkeep
+tests
+uploads
+coverage
+*.md
+docker-compose.yml
