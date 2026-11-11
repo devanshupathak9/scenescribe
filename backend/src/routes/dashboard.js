@@ -1,133 +1,143 @@
 const express = require('express');
-const { Scene, Vocabulary, Grammar, Submission, User } = require('../models');
+const { Op } = require('sequelize');
+const { Scene, Vocabulary, Grammar, Submission, User, sequelize } = require('../models');
 const { authenticate } = require('../middleware/auth');
+const { aiLimiter } = require('../middleware/rateLimit');
 const { analyseSentence } = require('../services/sentenceAnalysis');
+const { AiUnavailableError } = require('../services/ai');
+const { nextStreak } = require('../services/streak');
+const { todayStr } = require('../utils/date');
+const { ok, fail, asyncHandler, isUuid, requireUuidParam } = require('../utils/http');
+const { serializeSubmission } = require('./serializers');
 
 const router = express.Router();
 
-// GET /dashboard/today — fetch all of today's scenes, each with the user's submission status
-router.get('/today', authenticate, async (req, res) => {
-  try {
-    const today = new Date().toISOString().split('T')[0];
-    const scenes = await Scene.findAll({
-      where: { publish_date: today },
-      order: [['scene_order', 'ASC'], ['createdAt', 'ASC']],
-      include: [
-        { model: Vocabulary, as: 'vocabularies' },
-        { model: Grammar, as: 'grammars' },
-      ],
-    });
+const MIN_TEXT = 10;
+const MAX_TEXT = 2000;
+// A 'processing' claim older than this is assumed dead (crash mid-request).
+const STALE_PROCESSING_MS = 2 * 60 * 1000;
 
-    if (!scenes.length) {
-      return res.status(404).json({
-        success: false,
-        error: { code: 'NO_SCENE', message: 'No scene available for today' },
-      });
-    }
+const learningAids = [
+  { model: Vocabulary, as: 'vocabularies', attributes: ['id', 'word', 'definition', 'example', 'part_of_speech'] },
+  { model: Grammar, as: 'grammars', attributes: ['id', 'pattern', 'explanation', 'example'] },
+];
 
-    const submissions = await Submission.findAll({
-      where: {
-        user_id: req.user.id,
-        scene_id: scenes.map(s => s.id),
-        status: 'completed',
-      },
-    });
-    const submissionMap = new Map(submissions.map(s => [s.scene_id, s]));
+// GET /dashboard/today — all of today's scenes, each with the user's status.
+// The reference description is the AI's ground truth, so it is only revealed
+// after the learner has submitted for that scene.
+router.get('/today', authenticate, asyncHandler(async (req, res) => {
+  const today = todayStr();
+  const scenes = await Scene.findAll({
+    where: { publish_date: today },
+    order: [['scene_order', 'ASC'], ['createdAt', 'ASC']],
+    include: learningAids,
+  });
 
-    const result = scenes.map(scene => {
-      const sub = submissionMap.get(scene.id);
-      const video = {
-        video_id:        scene.id,
-        video_url:       scene.youtube_url,
-        title:           scene.title,
-        description:     scene.description,
-        additional_notes: scene.additional_notes,
-        difficulty:      scene.difficulty,
-        vocabularies:    scene.vocabularies,
-        grammars:        scene.grammars,
-      };
-      if (!sub) return { status: 'pending', video };
-      return {
-        status: 'submitted',
-        video,
-        submission: {
-          submission_id:        sub.id,
-          response_text:        sub.response_text,
-          input_type:           sub.input_type,
-          score:                sub.score,
-          breakdown: {
-            grammar:    sub.grammar_score,
-            vocabulary: sub.vocabulary_score,
-            clarity:    sub.clarity_score,
-          },
-          feedback:             sub.feedback || { issues: [], suggestions: [] },
-          improved_ai_response: sub.improved_ai_response || null,
-          ideal_sentence:       sub.ideal_sentence       || null,
-        },
-      };
-    });
-
-    return res.json({ success: true, data: { scenes: result } });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Server error' } });
+  if (!scenes.length) {
+    return fail(res, 404, 'NO_SCENE', 'No scene available for today', { date: today });
   }
-});
 
-// POST /dashboard/submit — submit description and get AI feedback
-router.post('/submit', authenticate, async (req, res) => {
+  const submissions = await Submission.findAll({
+    where: { user_id: req.user.id, scene_id: scenes.map(s => s.id), status: 'completed' },
+  });
+  const submissionMap = new Map(submissions.map(s => [s.scene_id, s]));
+
+  const result = scenes.map(scene => {
+    const sub = submissionMap.get(scene.id);
+    const video = {
+      video_id:         scene.id,
+      video_url:        scene.youtube_url,
+      title:            scene.title,
+      difficulty:       scene.difficulty,
+      vocabularies:     scene.vocabularies,
+      grammars:         scene.grammars,
+      // Notes are learner-facing hints; the description is the answer key.
+      additional_notes: scene.additional_notes,
+      description:      sub ? scene.description : null,
+    };
+    if (!sub) return { status: 'pending', video };
+    return { status: 'submitted', video, submission: serializeSubmission(sub) };
+  });
+
+  return ok(res, { date: today, scenes: result });
+}));
+
+// Claim the (user, scene) slot inside a short row-locked transaction so two
+// concurrent submits can't both be scored. Returns [submission] or [null, errorTuple].
+async function claimSubmission(userId, scene, text, inputType) {
+  return sequelize.transaction(async (t) => {
+    // Serialises submissions per user without holding a lock during the AI call.
+    await User.findByPk(userId, { transaction: t, lock: t.LOCK.UPDATE });
+
+    const existing = await Submission.findAll({
+      where: { user_id: userId, scene_id: scene.id },
+      transaction: t,
+    });
+    if (existing.some(s => s.status === 'completed')) {
+      return [null, [409, 'ALREADY_SUBMITTED', 'You have already submitted for this scene.']];
+    }
+    const live = existing.find(s => s.status === 'processing'
+      && Date.now() - new Date(s.updatedAt).getTime() < STALE_PROCESSING_MS);
+    if (live) return [null, [409, 'IN_PROGRESS', 'Your answer is already being scored. One moment…']];
+
+    // Reuse a failed/stale attempt so retries don't pile up rows.
+    const reusable = existing.find(s => s.status !== 'completed');
+    const fields = { response_text: text, input_type: inputType, status: 'processing' };
+    if (reusable) {
+      reusable.changed('updatedAt', true);
+      return [await reusable.update(fields, { transaction: t })];
+    }
+    return [await Submission.create({ user_id: userId, scene_id: scene.id, ...fields }, { transaction: t })];
+  });
+}
+
+// POST /dashboard/submit — submit a description and get feedback
+router.post('/submit', authenticate, aiLimiter, asyncHandler(async (req, res) => {
+  const { video_id, input_type } = req.body;
+  const text = typeof req.body.response_text === 'string' ? req.body.response_text.trim() : '';
+
+  if (!isUuid(video_id)) return fail(res, 404, 'SCENE_NOT_FOUND', 'Scene not found');
+  if (text.length < MIN_TEXT) {
+    return fail(res, 400, 'INVALID_INPUT', `Please write at least ${MIN_TEXT} characters.`);
+  }
+  if (text.length > MAX_TEXT) {
+    return fail(res, 400, 'INVALID_INPUT', `Please keep it under ${MAX_TEXT} characters.`);
+  }
+
+  const today = todayStr();
+  const scene = await Scene.findOne({
+    where: { id: video_id, publish_date: { [Op.lte]: today } },
+    include: learningAids,
+  });
+  if (!scene) return fail(res, 404, 'SCENE_NOT_FOUND', 'Scene not found');
+
+  const [submission, claimError] = await claimSubmission(
+    req.user.id, scene, text, input_type === 'microphone' ? 'microphone' : 'keyboard',
+  );
+  if (claimError) return fail(res, ...claimError);
+
+  let feedback;
   try {
-    const { video_id, response_text, input_type } = req.body;
-
-    if (!video_id || !response_text || response_text.trim().length < 10) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'video_id and response_text (min 10 chars) are required' },
-      });
-    }
-
-    const scene = await Scene.findByPk(video_id, {
-      include: [
-        { model: Vocabulary, as: 'vocabularies' },
-        { model: Grammar, as: 'grammars' },
-      ],
-    });
-    if (!scene) {
-      return res.status(404).json({
-        success: false,
-        error: { code: 'SCENE_NOT_FOUND', message: 'Scene not found' },
-      });
-    }
-
-    const existing = await Submission.findOne({
-      where: { user_id: req.user.id, scene_id: video_id, status: 'completed' },
-    });
-    if (existing) {
-      return res.status(409).json({
-        success: false,
-        error: { code: 'ALREADY_SUBMITTED', message: 'You have already submitted for this scene.' },
-      });
-    }
-
-    const submission = await Submission.create({
-      user_id: req.user.id,
-      scene_id: video_id,
-      response_text: response_text.trim(),
-      input_type: input_type === 'microphone' ? 'microphone' : 'keyboard',
-      status: 'processing',
-    });
-
-    // Build AI feedback via GPT-4o (fallback is handled inside analyseSentence)
-    const feedback = await analyseSentence({
+    feedback = await analyseSentence({
       title:                 scene.title,
-      student_response:      response_text.trim(),
+      student_response:      text,
       reference_description: scene.description      || null,
       additional_notes:      scene.additional_notes || null,
       difficulty:            scene.difficulty       || 'intermediate',
       vocabularies:          scene.vocabularies     || [],
       grammars:              scene.grammars         || [],
     });
+  } catch (err) {
+    await submission.update({ status: 'failed' });
+    if (err instanceof AiUnavailableError) {
+      return fail(res, 503, 'AI_UNAVAILABLE',
+        "We couldn't score your answer right now. Your attempt wasn't used — please try again in a moment.");
+    }
+    throw err;
+  }
 
+  const result = await sequelize.transaction(async (t) => {
+    const user = await User.findByPk(req.user.id, { transaction: t, lock: t.LOCK.UPDATE });
     await submission.update({
       score:             feedback.overall_score,
       grammar_score:     feedback.grammar_score,
@@ -136,103 +146,36 @@ router.post('/submit', authenticate, async (req, res) => {
       feedback: {
         issues:      feedback.issues      || [],
         suggestions: feedback.suggestions || [],
+        source:      feedback.source,
       },
       ai_response:          feedback.improved_sentence || null,
       improved_ai_response: feedback.improved_sentence || null,
       ideal_sentence:       feedback.ideal_sentence    || null,
       status: 'completed',
-    });
+    }, { transaction: t });
 
-    // Update user streak + stats
-    const user = req.user;
-    const today     = new Date().toISOString().split('T')[0];
-    const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0];
+    const streak = nextStreak(user, today);
+    await user.update({ ...streak, total_completed: (user.total_completed || 0) + 1 }, { transaction: t });
+    return { streak };
+  });
 
-    let newStreak = user.curr_streak;
-    if (user.last_submission_date === yesterday) {
-      newStreak = user.curr_streak + 1;
-    } else if (user.last_submission_date !== today) {
-      newStreak = 1;
-    }
+  return ok(res, {
+    ...serializeSubmission(submission),
+    // Revealed now that the learner has answered.
+    reference_description: scene.description,
+    new_streak: result.streak.curr_streak,
+  });
+}));
 
-    await user.update({
-      curr_streak:          newStreak,
-      longest_streak:       Math.max(user.longest_streak, newStreak),
-      total_completed:      (user.total_completed || 0) + 1,
-      last_submission_date: today,
-    });
-
-    res.json({
-      success: true,
-      data: {
-        submission_id: submission.id,
-        score:    feedback.overall_score,
-        breakdown: {
-          grammar:    feedback.grammar_score,
-          vocabulary: feedback.vocabulary_score,
-          clarity:    feedback.clarity_score,
-        },
-        input_type: submission.input_type,
-        feedback: {
-          issues:      feedback.issues      || [],
-          suggestions: feedback.suggestions || [],
-        },
-        ai_response:          feedback.improved_sentence || null,
-        improved_ai_response: feedback.improved_sentence || null,
-        ideal_sentence:       feedback.ideal_sentence    || null,
-        new_streak: newStreak,
-      },
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Server error processing submission' } });
-  }
-});
-
-// GET /dashboard/result/:submissionId — get a specific submission result
-router.get('/result/:submissionId', authenticate, async (req, res) => {
-  try {
+// GET /dashboard/result/:submissionId — a specific submission result
+router.get('/result/:submissionId', authenticate, requireUuidParam('submissionId', 'NOT_FOUND', 'Submission not found'),
+  asyncHandler(async (req, res) => {
     const submission = await Submission.findOne({
       where: { id: req.params.submissionId, user_id: req.user.id, status: 'completed' },
-      include: [{ model: Scene, attributes: ['id', 'title', 'youtube_url', 'description', 'additional_notes'] }],
+      include: [{ model: Scene, attributes: ['id', 'title', 'youtube_url', 'description', 'additional_notes', 'difficulty'] }],
     });
-
-    if (!submission) {
-      return res.status(404).json({
-        success: false,
-        error: { code: 'NOT_FOUND', message: 'Submission not found' },
-      });
-    }
-
-    res.json({
-      success: true,
-      data: {
-        submission_id: submission.id,
-        video: {
-          video_url:       submission.Scene.youtube_url,
-          description:     submission.Scene.description,
-          additional_notes: submission.Scene.additional_notes,
-          title:           submission.Scene.title,
-        },
-        response_text: submission.response_text,
-        input_type:    submission.input_type,
-        score:         submission.score,
-        breakdown: {
-          grammar:    submission.grammar_score,
-          vocabulary: submission.vocabulary_score,
-          clarity:    submission.clarity_score,
-        },
-        feedback:             submission.feedback || { issues: [], suggestions: [] },
-        ai_response:          submission.ai_response          || null,
-        improved_ai_response: submission.improved_ai_response || null,
-        ideal_sentence:       submission.ideal_sentence       || null,
-        date: submission.createdAt,
-      },
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Server error' } });
-  }
-});
+    if (!submission) return fail(res, 404, 'NOT_FOUND', 'Submission not found');
+    return ok(res, serializeSubmission(submission, { withScene: true }));
+  }));
 
 module.exports = router;

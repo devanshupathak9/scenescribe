@@ -1,80 +1,90 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
-import { useState } from 'react'
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom'
+import { useState, useEffect, useCallback, lazy, Suspense } from 'react'
 import AuthPage from './pages/AuthPage.jsx'
 import Home from './pages/Home.jsx'
-import Feedback from './pages/Feedback.jsx'
-import Profile from './pages/Profile.jsx'
-import Admin from './pages/Admin.jsx'
 import Navbar from './components/Navbar.jsx'
+import ErrorBoundary from './components/ErrorBoundary.jsx'
+import { LoadingState } from './components/ui.jsx'
+import { AUTH_EXPIRED_EVENT } from './api.js'
+import { authService } from './auth/authService.js'
+import { loadSession, saveSession, clearSession } from './auth/session.js'
+import { disableGoogleAutoSelect } from './auth/google.js'
 
-function PrivateRoute({ user, children }) {
-  if (!user) return <Navigate to="/" replace />
+// Route-level code splitting: the debate engine and admin panel aren't needed
+// for the first paint of the daily scene.
+const Feedback = lazy(() => import('./pages/Feedback.jsx'))
+const Profile = lazy(() => import('./pages/Profile.jsx'))
+const Admin = lazy(() => import('./pages/Admin.jsx'))
+const DebateHub = lazy(() => import('./pages/debate/DebateHub.jsx'))
+const DebateArena = lazy(() => import('./pages/debate/DebateArena.jsx'))
+const DebateReport = lazy(() => import('./pages/debate/DebateReport.jsx'))
+
+function RequireAuth({ user, admin = false, children }) {
+  const location = useLocation()
+  if (!user) return <Navigate to="/login" replace state={{ from: location.pathname }} />
+  if (admin && !user.is_admin) return <Navigate to="/" replace />
   return children
 }
 
-function AdminRoute({ user, children }) {
-  if (!user) return <Navigate to="/" replace />
-  if (!user.is_admin) return <Navigate to="/" replace />
-  return children
+function ScrollToTop() {
+  const { pathname } = useLocation()
+  useEffect(() => { window.scrollTo(0, 0) }, [pathname])
+  return null
 }
 
 export default function App() {
-  const [user, setUser] = useState(() => {
-    try {
-      const saved = localStorage.getItem('user')
-      return saved ? JSON.parse(saved) : null
-    } catch {
-      return null
-    }
-  })
+  const [user, setUser] = useState(() => loadSession()?.user || null)
 
-  function login(userData, token) {
-    localStorage.setItem('token', token)
-    localStorage.setItem('user', JSON.stringify(userData))
+  const login = useCallback((userData, token) => {
+    saveSession(userData, token)
     setUser(userData)
-  }
+  }, [])
 
-  function logout() {
-    localStorage.removeItem('token')
-    localStorage.removeItem('user')
+  const logout = useCallback(() => {
+    clearSession()
+    disableGoogleAutoSelect()
     setUser(null)
-  }
+  }, [])
+
+  // Any 401 from the API means the stored session is no longer valid.
+  useEffect(() => {
+    const onExpired = () => logout()
+    window.addEventListener(AUTH_EXPIRED_EVENT, onExpired)
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, onExpired)
+  }, [logout])
+
+  // Refresh the cached user once per load (role or name may have changed).
+  const signedIn = Boolean(user)
+  useEffect(() => {
+    if (!signedIn) return
+    authService.me()
+      .then(fresh => { saveSession(fresh); setUser(fresh) })
+      .catch(() => { /* 401 handled by the event; offline keeps the cached user */ })
+  }, [signedIn])
 
   return (
-    <BrowserRouter>
+    <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <ScrollToTop />
+      <a href="#main" className="skip-link">Skip to content</a>
       {user && <Navbar user={user} onLogout={logout} />}
-      <div className={user ? 'main-content' : ''}>
-        <Routes>
-          {/* Root: auth page when logged out, dashboard when logged in */}
-          <Route path="/" element={
-            user
-              ? <Home user={user} />
-              : <AuthPage onLogin={login} initialTab="register" />
-          } />
-          {/* Convenience aliases that switch the active tab */}
-          <Route path="/login" element={
-            user ? <Navigate to="/" replace /> : <AuthPage onLogin={login} initialTab="signin" />
-          } />
-          <Route path="/register" element={
-            user ? <Navigate to="/" replace /> : <AuthPage onLogin={login} initialTab="register" />
-          } />
-          <Route path="/feedback/:id" element={
-            <PrivateRoute user={user}>
-              <Feedback />
-            </PrivateRoute>
-          } />
-          <Route path="/profile" element={
-            <PrivateRoute user={user}>
-              <Profile user={user} />
-            </PrivateRoute>
-          } />
-          <Route path="/admin" element={
-            <AdminRoute user={user}>
-              <Admin />
-            </AdminRoute>
-          } />
-          <Route path="*" element={<Navigate to="/" />} />
-        </Routes>
+      <div id="main" className={user ? 'main-content' : ''}>
+        <ErrorBoundary>
+          <Suspense fallback={<LoadingState />}>
+            <Routes>
+              <Route path="/" element={user ? <Home user={user} /> : <AuthPage onLogin={login} initialTab="register" />} />
+              <Route path="/login" element={user ? <Navigate to="/" replace /> : <AuthPage onLogin={login} initialTab="signin" />} />
+              <Route path="/register" element={user ? <Navigate to="/" replace /> : <AuthPage onLogin={login} initialTab="register" />} />
+
+              <Route path="/feedback/:id" element={<RequireAuth user={user}><Feedback /></RequireAuth>} />
+              <Route path="/profile" element={<RequireAuth user={user}><Profile user={user} /></RequireAuth>} />
+              <Route path="/debate" element={<RequireAuth user={user}><DebateHub /></RequireAuth>} />
+              <Route path="/debate/:id/live" element={<RequireAuth user={user}><DebateArena /></RequireAuth>} />
+              <Route path="/debate/:id" element={<RequireAuth user={user}><DebateReport /></RequireAuth>} />
+              <Route path="/admin" element={<RequireAuth user={user} admin><Admin /></RequireAuth>} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </Suspense>
+        </ErrorBoundary>
       </div>
     </BrowserRouter>
   )

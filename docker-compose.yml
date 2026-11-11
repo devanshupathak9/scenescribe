@@ -38,7 +38,10 @@ services:
       DATABASE_URL: postgres://postgres:password@db:5432/scenescribe
       # jwt.sign() throws if this is unset, so it always needs a value.
       JWT_SECRET: ${JWT_SECRET:-dev-only-insecure-secret}
-      # Unset is fine: scoring falls back to a fixed placeholder score.
+      APP_TIMEZONE: ${APP_TIMEZONE:-Asia/Kolkata}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o}
+      OPENAI_FAST_MODEL: ${OPENAI_FAST_MODEL:-gpt-4o-mini}
+      # Unset is fine: scores are clearly labelled automatic estimates.
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       # Unset is fine: OTPs are printed to this service's logs instead of emailed.
       SMTP_HOST: ${SMTP_HOST:-}
@@ -61,6 +64,7 @@ services:
       # browser never needs to resolve the `api` container name, and there is no
       # cross-origin request.
       VITE_PROXY_TARGET: http://api:3001
+      VITE_GOOGLE_CLIENT_ID: ${VITE_GOOGLE_CLIENT_ID:-}
     volumes:
       # Source only — mounting all of ./web would shadow the image's node_modules.
       - ./web/src:/app/src

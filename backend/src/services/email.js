@@ -18,13 +18,20 @@ const transporter = smtpConfigured
     })
   : null;
 
-async function sendOTPEmail(to, otp) {
+const COPY = {
+  register: { subject: 'SceneScribe — Verify your email', heading: 'Verify your email', lead: 'Use the code below to verify your SceneScribe account.' },
+  reset:    { subject: 'SceneScribe — Reset your password', heading: 'Reset your password', lead: 'Use the code below to set a new SceneScribe password.' },
+};
+
+async function sendOTPEmail(to, otp, purpose = 'register') {
+  const copy = COPY[purpose] || COPY.register;
   // Dev fallback — when SMTP is not configured, print the OTP to the server
   // console so you can still test the full registration flow locally.
   if (!smtpConfigured || !transporter) {
+    if (process.env.NODE_ENV === 'test') return;
     console.log('─────────────────────────────────────────');
     console.log('[EMAIL SERVICE] SMTP not configured.');
-    console.log(`  To  : ${to}`);
+    console.log(`  To  : ${to} (${purpose})`);
     console.log(`  OTP : ${otp}`);
     console.log('  (Set SMTP_HOST, SMTP_USER, SMTP_PASS in .env to send real emails)');
     console.log('─────────────────────────────────────────');
@@ -34,12 +41,12 @@ async function sendOTPEmail(to, otp) {
   await transporter.sendMail({
     from: process.env.EMAIL_FROM || process.env.SMTP_USER,
     to,
-    subject: 'SceneScribe — Verify your email',
-    text: `Your SceneScribe verification code is: ${otp}\n\nThis code expires in 10 minutes. If you did not request this, please ignore this email.`,
+    subject: copy.subject,
+    text: `${copy.lead}\n\nYour code is: ${otp}\n\nThis code expires in 10 minutes. If you did not request this, please ignore this email.`,
     html: `
       <div style="font-family: sans-serif; max-width: 420px; margin: 0 auto; padding: 24px;">
-        <h2 style="margin-bottom: 8px;">Verify your email</h2>
-        <p style="color: #444; margin-bottom: 24px;">Use the code below to verify your SceneScribe account. It expires in <strong>10 minutes</strong>.</p>
+        <h2 style="margin-bottom: 8px;">${copy.heading}</h2>
+        <p style="color: #444; margin-bottom: 24px;">${copy.lead} It expires in <strong>10 minutes</strong>.</p>
         <div style="font-size: 36px; font-weight: bold; letter-spacing: 10px; text-align: center; padding: 24px 16px; background: #f4f4f4; border-radius: 8px;">
           ${otp}
         </div>

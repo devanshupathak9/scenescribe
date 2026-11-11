@@ -5,78 +5,58 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# Development (auto-restart on changes)
-npm run dev
-
-# Production
-npm start
-
-# With Docker (recommended — spins up Postgres + API together)
-docker compose up --build
-
-# Or the whole stack including the web app, from the repo root
-cd .. && docker compose up --build
+npm run dev                  # nodemon :3001
+npm start                    # plain node
+npm test                     # Jest + Supertest (runInBand) against TEST_DATABASE_URL
+docker compose up --build    # API + Postgres
 ```
 
-No test suite is configured. There is no linter config.
+Tests (`tests/*.test.js`) recreate the schema with `sync({ force: true })` on a dedicated test database — never point `TEST_DATABASE_URL` at real data. `tests/env.js` forces `NODE_ENV=test` (rate limits off, no AI key, OTP emails silent). Add a test for every bug you fix.
 
-### Required environment variables
+## Configuration
 
-Copy `.env.example` to `.env` and set at minimum:
-- `DATABASE_URL` — Postgres connection string (e.g. `postgres://postgres:password@localhost:5432/scenescribe`)
-- `JWT_SECRET` — any strong secret string
-- `OPENAI_API_KEY` — for AI feedback on submissions (GPT-4o via `services/sentenceAnalysis.js`)
+All behaviour-affecting env vars are read in `src/config/env.js`; `validateEnv()` runs before anything else in `src/index.js` and **refuses to start** in production with a weak `JWT_SECRET`, no `CORS_ORIGIN`, or demo accounts on. Full list with comments: `.env.example`.
 
-`DATABASE_SSL` is optional: `config/database.js` auto-detects from the hostname in `DATABASE_URL` (SSL off for `localhost`/`127.0.0.1`/`::1`/`db`/`postgres`, on for hosted databases). Set it to `true`/`false` only to override. SSL was previously hard-required, which made the API unable to talk to its own compose Postgres — don't reintroduce that.
-
-SMTP variables (`SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`) are optional locally — when absent, OTPs are printed to the server console instead of being emailed.
-
-`process.env.TZ` is force-set to `'UTC'` at the top of `src/index.js` (and in the Docker image/compose file) so all `Date`/`DATEONLY` comparisons — especially the "today" lookups in `dashboard.js` — are consistent regardless of host timezone.
+- `SEED_DEMO_ACCOUNTS` (default on outside production): `xyz@gmail.com / xyz@12345` (admin) and `abc@gmail.com / abc@12345`, passwords reset every boot.
+- `ADMIN_EMAIL` / `ADMIN_PASSWORD`: real admin, created once and promoted every boot (password never reset).
+- `APP_TIMEZONE`: the calendar day for "today" and streaks (`utils/date.js`). `process.env.TZ` is still forced to UTC.
+- No `OPENAI_API_KEY` is fine (see AI below).
 
 ## Architecture
 
-**Entry point:** `src/index.js` — starts Express, runs `sequelize.sync({ alter: true })` on boot (auto-migrates schema), then seeds the two hardcoded accounts.
+`src/index.js` (boot: validate env → sync DB → seed → listen, graceful SIGTERM) → `src/app.js` (`createApp()`: helmet, CORS allowlist, JSON, rate limits, routes, 404 + error handler). Tests import `createApp()` directly.
 
-**Request flow:**
 ```
-Request → Express → middleware/auth.js → routes/*.js → models/ → Postgres
-                                                      → services/email.js (auth only)
-                                                      → services/sentenceAnalysis.js → OpenAI (dashboard/submit + analyse only)
+routes/          auth · dashboard · profile · admin · analyse · debate   (+ serializers.js for shared shapes)
+middleware/      auth (authenticate, requireAdmin) · rateLimit · errors
+services/        ai (lazy OpenAI client, AiUnavailableError) · sentenceAnalysis · debate · heuristics
+                 streak · tokens · googleAuth · email · seed
+utils/           http (ok/fail/asyncHandler/isUuid/requireUuidParam/isDateString) · date
+data/            debateTopics.js
 ```
 
-**Route files map 1:1 to API domains:**
-- `routes/auth.js` — registration (2-step OTP), login
-- `routes/dashboard.js` — today's scene(s) + AI-scored submission
-- `routes/profile.js` — stats + submission history
-- `routes/admin.js` — scene scheduling CRUD + analytics (admin-only)
-- `routes/analyse.js` — re-scores an existing submission's text against its scene (used to re-run/override AI scoring outside the normal submit flow)
-
-**Models** are defined in `src/models/` and associations are wired in `src/models/index.js`. All models use UUID primary keys. Sequelize `{ alter: true }` sync means schema changes take effect on next restart without manual migrations.
-
-**Auth middleware** (`src/middleware/auth.js`):
-- `authenticate` — verifies JWT, loads `req.user`; applied to all dashboard/profile/admin/analyse routes
-- `requireAdmin` — checks `req.user.is_admin`; applied to all admin routes
+Write handlers with `asyncHandler` and return via `ok()` / `fail()`; thrown errors become the JSON envelope in `middleware/errors.js`. Guard `:id` params with `requireUuidParam` so malformed ids are 404s.
 
 ## Key patterns and gotchas
 
-**Two-step registration:** `POST /auth/register` only takes `{ email }` and creates a pending user (`is_registered: false`). The user row has `null` username and password until `POST /auth/verify` completes. Code that accesses `user.username` must handle this.
+**AI results.** `analyseSentence()` and `evaluateDebate()` return `source: 'ai' | 'estimate'`. No key → `services/heuristics.js` estimate. Key set but call fails → `AiUnavailableError`; routes respond `503 AI_UNAVAILABLE` and must not persist a score (`/dashboard/submit` marks the claim `failed` so the learner can retry). Overall scores are recomputed server-side from the category weights.
 
-**Password hashing:** The `User` model's `beforeCreate` hook only hashes `password_hash` if one is already set (so it's a no-op for step-1 registration, which creates the row with no password). Whenever *you* set an already-hashed value directly (`seedAdmin()`, `seedDefaultUser()`, the verify route), pass `{ hooks: false }` to avoid double-hashing.
+**One graded attempt per scene.** `/dashboard/submit` claims the (user, scene) slot inside a transaction that row-locks the user, then calls the AI *outside* the transaction, then finalises + updates the streak in a second short transaction. Don't hold a DB transaction across an AI call (pool size is small).
 
-**Multiple scenes per day:** A single `publish_date` can have up to `MAX_SCENES_PER_DAY` (4, defined in `routes/admin.js`) scenes, ordered by `Scene.scene_order`. `GET /dashboard/today` returns `{ scenes: [...] }` — an array, one entry per scene for today, each with its own `status` (`pending`/`submitted`) and submission if completed. It 404s with `NO_SCENE` only when *zero* scenes exist for today; there is no fallback to previous days. `GET /admin/schedule/:date` mirrors this shape for a given date.
+**Answer key.** `Scene.description` is the reference answer: `/dashboard/today` returns it as `null` until the learner has submitted.
 
-**AI feedback fallback:** `analyseSentence()` in `services/sentenceAnalysis.js` wraps the OpenAI call in a try/catch; on any failure it calls the local `fallback()` helper, which returns fixed scores of 6 (grammar/vocabulary/clarity/overall) so the submission always resolves as `completed` rather than `failed`. Both `routes/dashboard.js` (`/submit`) and `routes/analyse.js` (`/sentence`) go through this same function, so the fallback behavior is shared.
+**Streaks.** Stored `curr_streak` only changes on submission; read it through `effectiveStreak()` (returns 0 after a missed day).
 
-**Submission AI fields:** beyond the numeric scores, a completed `Submission` carries `feedback` (jsonb `{ issues: string[], suggestions: string[] }`), `ai_response`/`improved_ai_response` (corrected rewrite of the student's sentence — currently duplicated across two columns), and `ideal_sentence` (best-possible answer derived from the scene's `description` and hints). All four come straight from the OpenAI structured-output response in `sentenceAnalysis.js`.
+**Two-step registration.** `POST /auth/register` creates a pending user (`is_registered: false`, null username/password). OTPs carry `otp_purpose` (`register` | `reset`) and `otp_attempts` (5 max). Look users up by email with the case-insensitive `byEmail()` helper — legacy rows may have mixed case. Google-only users have no `password_hash`.
 
-**Seed accounts:** On every startup, `src/index.js` upserts two fixed accounts and resets their passwords:
-- Admin: `xyz@gmail.com` / `xyz@12345` (`is_admin: true`)
-- Default user: `abc@gmail.com` / `abc@12345` (`is_admin: false`)
+**Password hashing.** The `User` `beforeCreate` hook hashes `password_hash` if set; whenever you set an already-hashed value pass `{ hooks: false }`.
 
-This is intentional so both accounts are always in a known state.
+**Debates.** Turn order: FOR opens every round (`services/debate.js` `turnPlan`). `POST /debate/:id/turns` takes `turn_index` to reject double submits; the AI reply is appended in a separate transaction that re-checks the turn count. AI turns are capped by word budget so TTS fits in 40s.
 
-**Response envelope:** All responses follow `{ success: true, data: {...} }` or `{ success: false, error: { code: "...", message: "..." } }`. Maintain this consistently.
+**Google sign-in.** `routes/auth.js` `/google` is complete except `services/googleAuth.js#verifyGoogleIdToken`, which currently throws `501 GOOGLE_AUTH_NOT_CONFIGURED`. Its docblock has the implementation.
 
-**AI model:** All LLM calls use GPT-4o via the `openai` npm package (`services/sentenceAnalysis.js`), not Anthropic/Claude despite the product name and some stale mentions in `README.md`. Structured-output mode (`json_schema` + `strict: true`) guarantees the response matches `SCHEMA` — no markdown stripping needed.
+**Admin delete.** Refused (`409 SCENE_HAS_SUBMISSIONS`) once anyone has answered the scene — deleting would erase history.
 
-**`Scene.description` is dual-purpose:** it's both the scene summary shown to the student and the reference/"admin" answer fed into the AI prompt as ground truth (see `buildPrompt()` in `sentenceAnalysis.js`). There is no separate `reference_description` column — `README.md`'s schema table is out of date on this and a few other Scene columns (no `language`, `submission_count`, or `reference_description` fields exist on the model).
+**Schema.** `sequelize.sync({ alter: DB_SYNC_ALTER })` on boot; no migrations yet.
+
+**Response envelope:** `{ success: true, data, meta? }` / `{ success: false, error: { code, message, details? } }`. Keep it.
