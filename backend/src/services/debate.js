@@ -118,11 +118,12 @@ const lowerFirst = (s) => s.charAt(0).toLowerCase() + s.slice(1);
 function turnMetrics(turn) {
   const text = turn.text || '';
   const w = H.words(text);
-  const minutes = Math.max(turn.duration_s || 0, 1) / 60;
+  const seconds = turn.duration_s || 0;
   const m = turn.metrics || {};
   return {
     words: w.length,
-    wpm: Math.round(w.length / minutes),
+    // Pace is meaningless for a few seconds of speech.
+    wpm: seconds >= 5 && w.length ? Math.round(w.length / (seconds / 60)) : null,
     fillers: H.countFillers(text),
     long_pauses: Number.isFinite(m.long_pauses) ? m.long_pauses : null,
     avg_confidence: Number.isFinite(m.avg_confidence) ? Math.round(m.avg_confidence * 100) / 100 : null,
@@ -141,7 +142,7 @@ function aggregateMetrics(userTurns) {
     turns: per,
     total_words: totalWords,
     speaking_seconds: Math.round(totalSeconds),
-    avg_wpm: totalSeconds ? Math.round(totalWords / (totalSeconds / 60)) : 0,
+    avg_wpm: totalSeconds >= 10 && totalWords ? Math.round(totalWords / (totalSeconds / 60)) : null,
     filler_count: per.reduce((a, m) => a + m.fillers, 0),
     long_pauses: per.every(m => m.long_pauses === null) ? null : per.reduce((a, m) => a + (m.long_pauses || 0), 0),
     avg_confidence: confs.length ? Math.round((confs.reduce((a, c) => a + c, 0) / confs.length) * 100) / 100 : null,
@@ -233,7 +234,7 @@ function evaluationPrompt(debate, metrics) {
     `Input: ${metrics.spoken ? 'spoken (browser speech recognition transcript — may contain recognition errors and lacks punctuation)' : 'typed (speech could not be captured; do not assess pronunciation strictly)'}.`,
     '',
     'Speech metrics (learner only):',
-    `- Total words: ${metrics.total_words} in ${metrics.speaking_seconds}s; average pace ${metrics.avg_wpm} wpm (comfortable conversational English ≈ 110-160 wpm)`,
+    `- Total words: ${metrics.total_words} in ${metrics.speaking_seconds}s; average pace ${metrics.avg_wpm ?? 'not measurable (too little speech)'} wpm (comfortable conversational English ≈ 110-160 wpm)`,
     `- Filler words: ${metrics.filler_count}`,
     `- Long pauses (>2s): ${metrics.long_pauses ?? 'unknown'}`,
     `- Speech recognition confidence: ${metrics.avg_confidence ?? 'unknown'} (0-1; lower often means unclear pronunciation or background noise)`,
@@ -317,14 +318,14 @@ function estimateDebateReport(debate, metrics) {
   const expected = debate.rounds * debate.turn_seconds * 1.6; // ~100 wpm target
   const coverage = Math.min(1, said / Math.max(expected, 1));
 
-  const paceScore = metrics.avg_wpm === 0 ? 0
+  const paceScore = !said ? 0 : metrics.avg_wpm === null ? 55
     : metrics.avg_wpm < 70 ? 45 : metrics.avg_wpm < 100 ? 62 : metrics.avg_wpm <= 170 ? 75 : 65;
   const fillerRate = said ? metrics.filler_count / said : 0;
 
   const scores = {
     grammar: { score: clamp100(said ? 78 - issues.length * 8 : 0), comment: issues.length ? `Watch out for: ${issues[0]}` : 'No common grammar slips were detected automatically.' },
     vocabulary: { score: clamp100(said ? 40 + metrics.vocabulary_variety * 45 : 0), comment: `You used ${Math.round(metrics.vocabulary_variety * 100)}% unique words.` },
-    fluency: { score: clamp100(paceScore * coverage + (1 - coverage) * 20 - fillerRate * 150), comment: `Your pace was about ${metrics.avg_wpm} words per minute with ${metrics.filler_count} filler word${metrics.filler_count === 1 ? '' : 's'}.` },
+    fluency: { score: clamp100(paceScore * coverage + (1 - coverage) * 20 - fillerRate * 150), comment: `${metrics.avg_wpm ? `Your pace was about ${metrics.avg_wpm} words per minute` : 'Your turns were too short to measure your pace'}, with ${metrics.filler_count} filler word${metrics.filler_count === 1 ? '' : 's'}.` },
     pronunciation: { score: clamp100(metrics.avg_confidence !== null ? metrics.avg_confidence * 90 : (said ? 60 : 0)), comment: metrics.avg_confidence !== null ? 'Estimated from how confidently your speech was recognised.' : 'Could not be measured for this debate.' },
     confidence: { score: clamp100(30 + coverage * 50), comment: coverage > 0.7 ? 'You used most of your speaking time — good confidence.' : 'Try to keep speaking for your full turn, even if you repeat your main point with a new example.' },
   };
