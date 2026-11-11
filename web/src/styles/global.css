@@ -81,14 +81,15 @@ h1, h2, h3, .syne { font-family: 'Syne', sans-serif; }
 .navbar-logo {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   text-decoration: none;
   font-family: 'Syne', sans-serif;
   font-size: 1.1rem;
   font-weight: 700;
 }
-.logo-scene  { color: var(--text); }
-.logo-scribe { color: var(--yellow); }
+.wordmark { color: var(--text); letter-spacing: -0.01em; white-space: nowrap; }
+.wordmark-accent { color: var(--yellow); }
+.logo-mark { display: block; flex-shrink: 0; }
 .admin-badge {
   font-family: 'DM Sans', sans-serif;
   font-size: 11px;

@@ -1,5 +1,7 @@
 const express = require('express');
-const { Debate, sequelize } = require('../models');
+const { Debate, User, sequelize } = require('../models');
+const { nextStreak } = require('../services/streak');
+const { todayStr } = require('../utils/date');
 const { authenticate } = require('../middleware/auth');
 const { aiLimiter } = require('../middleware/rateLimit');
 const { AiUnavailableError } = require('../services/ai');
@@ -210,7 +212,12 @@ router.post('/:id/finish', requireUuidParam('id', 'NOT_FOUND', 'Debate not found
   }
 
   report.ended_early = Boolean(D.nextTurn(debate));
-  await debate.update({ status: 'completed', report, overall_score: report.overall_score, completed_at: new Date() });
+  // A finished debate is a practice day: it keeps the streak alive like a scene does.
+  await sequelize.transaction(async (t) => {
+    await debate.update({ status: 'completed', report, overall_score: report.overall_score, completed_at: new Date() }, { transaction: t });
+    const user = await User.findByPk(req.user.id, { transaction: t, lock: t.LOCK.UPDATE });
+    await user.update(nextStreak(user, todayStr()), { transaction: t });
+  });
   return ok(res, serialize(debate));
 }));
 

@@ -13,6 +13,7 @@ import { disableGoogleAutoSelect } from './auth/google.js'
 // Route-level code splitting: the debate engine and admin panel aren't needed
 // for the first paint of the daily scene.
 const Feedback = lazy(() => import('./pages/Feedback.jsx'))
+const ScenePage = lazy(() => import('./pages/ScenePage.jsx'))
 const Profile = lazy(() => import('./pages/Profile.jsx'))
 const Admin = lazy(() => import('./pages/Admin.jsx'))
 const DebateHub = lazy(() => import('./pages/debate/DebateHub.jsx'))
@@ -75,6 +76,7 @@ export default function App() {
               <Route path="/login" element={user ? <Navigate to="/" replace /> : <AuthPage onLogin={login} initialTab="signin" />} />
               <Route path="/register" element={user ? <Navigate to="/" replace /> : <AuthPage onLogin={login} initialTab="register" />} />
 
+              <Route path="/scene/:id" element={<RequireAuth user={user}><ScenePage /></RequireAuth>} />
               <Route path="/feedback/:id" element={<RequireAuth user={user}><Feedback /></RequireAuth>} />
               <Route path="/profile" element={<RequireAuth user={user}><Profile user={user} /></RequireAuth>} />
               <Route path="/debate" element={<RequireAuth user={user}><DebateHub /></RequireAuth>} />
