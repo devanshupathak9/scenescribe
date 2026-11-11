@@ -39,6 +39,9 @@ const env = {
   // Optional real admin, created/promoted on boot (password only set on create).
   ADMIN_EMAIL: (process.env.ADMIN_EMAIL || '').trim().toLowerCase(),
   ADMIN_PASSWORD: process.env.ADMIN_PASSWORD || '',
+  // One-off recovery: set to true for one deploy to overwrite the admin password
+  // with ADMIN_PASSWORD, then remove it.
+  ADMIN_RESET_PASSWORD: bool(process.env.ADMIN_RESET_PASSWORD, false),
 
   // Sequelize `sync({ alter: true })` on boot. On by default because the project
   // has no migrations yet; set DB_SYNC_ALTER=false once you add them.

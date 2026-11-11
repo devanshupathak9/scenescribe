@@ -74,7 +74,8 @@ Pronunciation is inferred from browser speech-recognition confidence — a proxy
 | GET | `/schedule` · `/schedule/:date` | Scenes with vocabulary + grammar |
 | PATCH | `/schedule/:id` | Any field above; passing `vocabularies`/`grammars` replaces the list |
 | DELETE | `/schedule/:id` | `409 SCENE_HAS_SUBMISSIONS` once learners have answered it |
-| GET | `/analytics` | Totals, average score, `ai_enabled`, recent submissions |
+| GET | `/analytics` | `today`, totals, `active_today`/`active_7d`, `new_users_7d`, 14-day `activity[]`, 14-day `runway[]` + `first_gap`, `recent_activity[]` (scenes + debates), `system { ai_enabled, email_enabled, timezone }` |
+| GET | `/learners?q=&page=` | Registered learners (20/page, newest first), searchable by name, username or email; streak, scenes, debates, last practice |
 
 ### Other
 - `POST /api/analyse/sentence` `{ sentence, video_id }` — practice scoring; nothing is saved.

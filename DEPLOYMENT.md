@@ -15,7 +15,7 @@ Web → **Vercel** · API + Postgres → **Railway**. Deploy the backend first: 
 | `NODE_ENV` | `production` |
 | `JWT_SECRET` | 32+ random chars — `node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"` |
 | `CORS_ORIGIN` | your Vercel URL(s), e.g. `https://scenescribe.vercel.app,https://scenescribe-*-yourteam.vercel.app` |
-| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | your admin login (password 12+ chars; only used to create the account) |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | your admin login (password 12+ chars; only used to create the account). Forgot it? Set `ADMIN_RESET_PASSWORD=true` for one deploy, then remove it |
 | `OPENAI_API_KEY` | enables real AI scoring, the AI debate opponent and debate reports |
 | `APP_TIMEZONE` | `Asia/Kolkata` (when "today" rolls over for scenes and streaks) |
 | `SMTP_HOST` `SMTP_PORT` `SMTP_USER` `SMTP_PASS` `EMAIL_FROM` | real OTP emails (without them, codes only appear in the Railway logs) |
