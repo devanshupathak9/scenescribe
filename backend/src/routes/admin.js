@@ -1,239 +1,229 @@
 const express = require('express');
-const { Scene, Vocabulary, Grammar, Submission, User } = require('../models');
+const { Scene, Vocabulary, Grammar, Submission, User, Debate, sequelize } = require('../models');
 const { authenticate, requireAdmin } = require('../middleware/auth');
+const { env } = require('../config/env');
+const { ok, fail, asyncHandler, isDateString, requireUuidParam } = require('../utils/http');
 
 const router = express.Router();
 
 router.use(authenticate, requireAdmin);
 
 const MAX_SCENES_PER_DAY = 4;
+const DIFFICULTIES = ['beginner', 'intermediate', 'advanced'];
+const YOUTUBE_RE = /(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/|live\/))([A-Za-z0-9_-]{11})/;
 
-// POST /admin/schedule — create a scheduled video (up to MAX_SCENES_PER_DAY per date)
-router.post('/schedule', async (req, res) => {
-  try {
-    const {
-      date, video_url, title, description,
-      additional_notes, is_premium, difficulty,
-      scene_order, vocabularies, grammars,
-    } = req.body;
+const withAids = [
+  { model: Vocabulary, as: 'vocabularies' },
+  { model: Grammar, as: 'grammars' },
+];
 
-    if (!video_url || !date || !title || !description) {
-      return res.status(400).json({
-        success: false,
-        error: { code: 'INVALID_INPUT', message: 'date, video_url, title, and description are required' },
-      });
-    }
+function serializeScene(s) {
+  return {
+    video_id:         s.id,
+    date:             s.publish_date,
+    scene_order:      s.scene_order,
+    video_url:        s.youtube_url,
+    title:            s.title,
+    description:      s.description,
+    additional_notes: s.additional_notes,
+    is_premium:       s.is_premium || false,
+    difficulty:       s.difficulty,
+    vocabularies:     s.vocabularies || [],
+    grammars:         s.grammars || [],
+  };
+}
 
-    const existingCount = await Scene.count({ where: { publish_date: date } });
-    if (existingCount >= MAX_SCENES_PER_DAY) {
-      return res.status(409).json({
-        success: false,
-        error: { code: 'DATE_LIMIT', message: `Maximum ${MAX_SCENES_PER_DAY} scenes per day allowed` },
-      });
-    }
+const str = (v, max) => (typeof v === 'string' ? v.trim().slice(0, max) : v);
 
-    const scene = await Scene.create({
-      title,
-      description,
-      youtube_url: video_url,
-      additional_notes: additional_notes || null,
-      publish_date: date,
-      is_premium: is_premium || false,
-      difficulty: difficulty || 'intermediate',
-      scene_order: scene_order || (existingCount + 1),
-    });
+// Validates create (partial=false) or update (partial=true) payloads.
+// Returns [fields, error] where fields uses DB column names.
+function validateScene(body, { partial = false } = {}) {
+  const f = {};
+  const has = (k) => body[k] !== undefined;
 
-    if (Array.isArray(vocabularies)) {
-      for (const v of vocabularies) {
-        if (v.word && v.definition) {
-          await Vocabulary.create({ scene_id: scene.id, ...v });
-        }
-      }
-    }
-
-    if (Array.isArray(grammars)) {
-      for (const g of grammars) {
-        if (g.pattern && g.explanation) {
-          await Grammar.create({ scene_id: scene.id, ...g });
-        }
-      }
-    }
-
-    res.status(201).json({
-      success: true,
-      data: { video_id: scene.id },
-      message: 'Video scheduled successfully',
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: error.message || 'Server error' } });
+  if (!partial || has('date')) {
+    if (!isDateString(body.date)) return [null, 'date must be a valid YYYY-MM-DD date'];
+    f.publish_date = body.date;
   }
-});
-
-// GET /admin/schedule — get all scheduled videos
-router.get('/schedule', async (req, res) => {
-  try {
-    const scenes = await Scene.findAll({
-      order: [['publish_date', 'ASC']],
-      include: [
-        { model: Vocabulary, as: 'vocabularies' },
-        { model: Grammar, as: 'grammars' },
-      ],
-    });
-
-    res.json({
-      success: true,
-      data: scenes.map(s => ({
-        video_id:        s.id,
-        date:            s.publish_date,
-        scene_order:     s.scene_order,
-        video_url:       s.youtube_url,
-        title:           s.title,
-        description:     s.description,
-        additional_notes: s.additional_notes,
-        is_premium:      s.is_premium || false,
-        difficulty:      s.difficulty,
-        vocabularies:    s.vocabularies,
-        grammars:        s.grammars,
-      })),
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Server error' } });
+  if (!partial || has('title')) {
+    const t = str(body.title, 200);
+    if (!t) return [null, 'title is required'];
+    f.title = t;
   }
-});
+  if (!partial || has('video_url')) {
+    const u = str(body.video_url, 500);
+    if (!u || !YOUTUBE_RE.test(u)) return [null, 'video_url must be a YouTube link (watch, youtu.be, shorts or embed)'];
+    f.youtube_url = u;
+  }
+  if (!partial || has('description')) {
+    const d = str(body.description, 2000);
+    if (!d) return [null, 'description (the reference answer) is required'];
+    f.description = d;
+  }
+  if (has('additional_notes')) f.additional_notes = str(body.additional_notes, 2000) || null;
+  if (has('is_premium')) f.is_premium = Boolean(body.is_premium);
+  if (has('difficulty')) {
+    if (!DIFFICULTIES.includes(body.difficulty)) return [null, `difficulty must be one of ${DIFFICULTIES.join(', ')}`];
+    f.difficulty = body.difficulty;
+  }
+  if (has('scene_order') && body.scene_order !== null) {
+    const n = parseInt(body.scene_order, 10);
+    if (!(n >= 1 && n <= MAX_SCENES_PER_DAY)) return [null, `scene_order must be 1–${MAX_SCENES_PER_DAY}`];
+    f.scene_order = n;
+  }
+  return [f, null];
+}
 
-// GET /admin/schedule/:date — get all scenes for a specific date
-router.get('/schedule/:date', async (req, res) => {
-  try {
-    const scenes = await Scene.findAll({
-      where: { publish_date: req.params.date },
-      order: [['scene_order', 'ASC'], ['createdAt', 'ASC']],
-      include: [
-        { model: Vocabulary, as: 'vocabularies' },
-        { model: Grammar, as: 'grammars' },
-      ],
-    });
+function cleanAids(vocabularies, grammars) {
+  const v = Array.isArray(vocabularies)
+    ? vocabularies
+      .filter(x => x && str(x.word, 100) && str(x.definition, 500))
+      .slice(0, 20)
+      .map(x => ({
+        word: str(x.word, 100), definition: str(x.definition, 500),
+        example: str(x.example, 500) || null, part_of_speech: str(x.part_of_speech, 30) || null,
+      }))
+    : null;
+  const g = Array.isArray(grammars)
+    ? grammars
+      .filter(x => x && str(x.pattern, 200) && str(x.explanation, 1000))
+      .slice(0, 10)
+      .map(x => ({ pattern: str(x.pattern, 200), explanation: str(x.explanation, 1000), example: str(x.example, 500) || null }))
+    : null;
+  return [v, g];
+}
 
-    if (!scenes.length) {
-      return res.status(404).json({
-        success: false,
-        error: { code: 'NOT_FOUND', message: 'No videos scheduled for this date' },
-      });
+async function replaceAids(sceneId, vocabularies, grammars, t) {
+  const [v, g] = cleanAids(vocabularies, grammars);
+  if (v) {
+    await Vocabulary.destroy({ where: { scene_id: sceneId }, transaction: t });
+    if (v.length) await Vocabulary.bulkCreate(v.map(x => ({ ...x, scene_id: sceneId })), { transaction: t });
+  }
+  if (g) {
+    await Grammar.destroy({ where: { scene_id: sceneId }, transaction: t });
+    if (g.length) await Grammar.bulkCreate(g.map(x => ({ ...x, scene_id: sceneId })), { transaction: t });
+  }
+}
+
+// POST /admin/schedule — create a scene (up to MAX_SCENES_PER_DAY per date)
+router.post('/schedule', asyncHandler(async (req, res) => {
+  const [fields, error] = validateScene(req.body);
+  if (error) return fail(res, 400, 'INVALID_INPUT', error);
+
+  const scene = await sequelize.transaction(async (t) => {
+    const existingCount = await Scene.count({ where: { publish_date: fields.publish_date }, transaction: t });
+    if (existingCount >= MAX_SCENES_PER_DAY) return null;
+    const created = await Scene.create({
+      difficulty: 'intermediate',
+      is_premium: false,
+      scene_order: existingCount + 1,
+      ...fields,
+    }, { transaction: t });
+    await replaceAids(created.id, req.body.vocabularies, req.body.grammars, t);
+    return created;
+  });
+
+  if (!scene) return fail(res, 409, 'DATE_LIMIT', `Maximum ${MAX_SCENES_PER_DAY} scenes per day allowed`);
+  return ok(res, { video_id: scene.id }, 201, { message: 'Scene scheduled' });
+}));
+
+// GET /admin/schedule — all scenes
+router.get('/schedule', asyncHandler(async (req, res) => {
+  const scenes = await Scene.findAll({
+    order: [['publish_date', 'ASC'], ['scene_order', 'ASC'], ['createdAt', 'ASC']],
+    include: withAids,
+  });
+  return ok(res, scenes.map(serializeScene));
+}));
+
+// GET /admin/schedule/:date — all scenes for a date
+router.get('/schedule/:date', asyncHandler(async (req, res) => {
+  if (!isDateString(req.params.date)) return fail(res, 400, 'INVALID_INPUT', 'date must be YYYY-MM-DD');
+  const scenes = await Scene.findAll({
+    where: { publish_date: req.params.date },
+    order: [['scene_order', 'ASC'], ['createdAt', 'ASC']],
+    include: withAids,
+  });
+  if (!scenes.length) return fail(res, 404, 'NOT_FOUND', 'No scenes scheduled for this date');
+  return ok(res, scenes.map(serializeScene));
+}));
+
+// PATCH /admin/schedule/:id — update a scene (and optionally its vocab/grammar lists)
+router.patch('/schedule/:id', requireUuidParam('id', 'NOT_FOUND', 'Scene not found'), asyncHandler(async (req, res) => {
+  const [fields, error] = validateScene(req.body, { partial: true });
+  if (error) return fail(res, 400, 'INVALID_INPUT', error);
+
+  const result = await sequelize.transaction(async (t) => {
+    const scene = await Scene.findByPk(req.params.id, { transaction: t });
+    if (!scene) return [404, 'NOT_FOUND', 'Scene not found'];
+    if (fields.publish_date && fields.publish_date !== scene.publish_date) {
+      const count = await Scene.count({ where: { publish_date: fields.publish_date }, transaction: t });
+      if (count >= MAX_SCENES_PER_DAY) return [409, 'DATE_LIMIT', `Maximum ${MAX_SCENES_PER_DAY} scenes per day allowed`];
     }
+    await scene.update(fields, { transaction: t });
+    await replaceAids(scene.id, req.body.vocabularies, req.body.grammars, t);
+    return null;
+  });
+  if (result) return fail(res, ...result);
 
-    res.json({
-      success: true,
-      data: scenes.map(s => ({
-        video_id:        s.id,
-        date:            s.publish_date,
-        scene_order:     s.scene_order,
-        video_url:       s.youtube_url,
-        title:           s.title,
-        description:     s.description,
-        additional_notes: s.additional_notes,
-        is_premium:      s.is_premium || false,
-        difficulty:      s.difficulty,
-        vocabularies:    s.vocabularies,
-        grammars:        s.grammars,
-      })),
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Server error' } });
+  const scene = await Scene.findByPk(req.params.id, { include: withAids });
+  return ok(res, serializeScene(scene), 200, { message: 'Scene updated' });
+}));
+
+// DELETE /admin/schedule/:id — delete a scene that nobody has answered yet.
+// Deleting an answered scene would erase learners' history, so it is refused.
+router.delete('/schedule/:id', requireUuidParam('id', 'NOT_FOUND', 'Scene not found'), asyncHandler(async (req, res) => {
+  const scene = await Scene.findByPk(req.params.id);
+  if (!scene) return fail(res, 404, 'NOT_FOUND', 'Scene not found');
+
+  const answered = await Submission.count({ where: { scene_id: scene.id } });
+  if (answered) {
+    return fail(res, 409, 'SCENE_HAS_SUBMISSIONS',
+      `${answered} learner${answered === 1 ? ' has' : 's have'} already answered this scene, so it can't be deleted. Edit it instead.`);
   }
-});
-
-// PATCH /admin/schedule/:id — update a scheduled video
-router.patch('/schedule/:id', async (req, res) => {
-  try {
-    const scene = await Scene.findByPk(req.params.id);
-    if (!scene) {
-      return res.status(404).json({
-        success: false,
-        error: { code: 'NOT_FOUND', message: 'Scene not found' },
-      });
-    }
-
-    const { video_url, title, description, additional_notes, is_premium, difficulty } = req.body;
-
-    await scene.update({
-      ...(video_url        !== undefined && { youtube_url: video_url }),
-      ...(title            !== undefined && { title }),
-      ...(description      !== undefined && { description }),
-      ...(additional_notes !== undefined && { additional_notes }),
-      ...(is_premium       !== undefined && { is_premium }),
-      ...(difficulty       !== undefined && { difficulty }),
-    });
-
-    res.json({ success: true, message: 'Video updated successfully' });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Server error' } });
-  }
-});
-
-// DELETE /admin/schedule/:id — delete a scheduled video
-router.delete('/schedule/:id', async (req, res) => {
-  try {
-    const scene = await Scene.findByPk(req.params.id);
-    if (!scene) {
-      return res.status(404).json({
-        success: false,
-        error: { code: 'NOT_FOUND', message: 'Scene not found' },
-      });
-    }
-    await scene.destroy();
-    res.json({ success: true, message: 'Video deleted successfully' });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Server error' } });
-  }
-});
+  await sequelize.transaction(async (t) => {
+    await Vocabulary.destroy({ where: { scene_id: scene.id }, transaction: t });
+    await Grammar.destroy({ where: { scene_id: scene.id }, transaction: t });
+    await scene.destroy({ transaction: t });
+  });
+  return ok(res, { video_id: scene.id }, 200, { message: 'Scene deleted' });
+}));
 
 // GET /admin/analytics
-router.get('/analytics', async (req, res) => {
-  try {
-    const [totalUsers, totalSubmissions, totalScenes, avgResult] = await Promise.all([
-      User.count(),
-      Submission.count({ where: { status: 'completed' } }),
-      Scene.count(),
-      Submission.findOne({
-        attributes: [[require('sequelize').fn('AVG', require('sequelize').col('score')), 'avg_score']],
-        where: { status: 'completed' },
-      }),
-    ]);
-
-    const recentSubmissions = await Submission.findAll({
+router.get('/analytics', asyncHandler(async (req, res) => {
+  const [totalUsers, totalSubmissions, totalScenes, avgResult, totalDebates, recentSubmissions] = await Promise.all([
+    User.count({ where: { is_registered: true } }),
+    Submission.count({ where: { status: 'completed' } }),
+    Scene.count(),
+    Submission.findOne({
+      attributes: [[sequelize.fn('AVG', sequelize.col('score')), 'avg_score']],
+      where: { status: 'completed' },
+      raw: true,
+    }),
+    Debate.count({ where: { status: 'completed' } }),
+    Submission.findAll({
       where: { status: 'completed' },
       order: [['createdAt', 'DESC']],
       limit: 10,
-      include: [
-        { model: User, attributes: ['username'] },
-        { model: Scene, attributes: ['title'] },
-      ],
-    });
+      include: [{ model: User, attributes: ['username'] }, { model: Scene, attributes: ['title'] }],
+    }),
+  ]);
 
-    res.json({
-      success: true,
-      data: {
-        total_users:        totalUsers,
-        total_submissions:  totalSubmissions,
-        total_scenes:       totalScenes,
-        average_score:      parseFloat(avgResult?.dataValues?.avg_score || 0).toFixed(1),
-        recent_submissions: recentSubmissions.map(s => ({
-          id:          s.id,
-          username:    s.User?.username,
-          scene_title: s.Scene?.title,
-          score:       s.score,
-          date:        s.createdAt,
-        })),
-      },
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ success: false, error: { code: 'SERVER_ERROR', message: 'Server error' } });
-  }
-});
+  return ok(res, {
+    total_users:        totalUsers,
+    total_submissions:  totalSubmissions,
+    total_scenes:       totalScenes,
+    total_debates:      totalDebates,
+    average_score:      Number(avgResult?.avg_score || 0).toFixed(1),
+    ai_enabled:         env.aiEnabled,
+    recent_submissions: recentSubmissions.map(s => ({
+      id:          s.id,
+      username:    s.User?.username,
+      scene_title: s.Scene?.title,
+      score:       s.score,
+      date:        s.createdAt,
+    })),
+  });
+}));
 
 module.exports = router;

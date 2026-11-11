@@ -27,7 +27,7 @@ const sequelize = new Sequelize(process.env.DATABASE_URL, {
   logging: process.env.NODE_ENV === 'development' ? console.log : false,
   dialectOptions: useSsl ? { ssl: { require: true, rejectUnauthorized: false } } : {},
   pool: {
-    max: 5,
+    max: parseInt(process.env.DB_POOL_MAX, 10) || 10,
     min: 0,
     acquire: 30000,
     idle: 10000,
