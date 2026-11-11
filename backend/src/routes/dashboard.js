@@ -5,8 +5,8 @@ const { authenticate } = require('../middleware/auth');
 const { aiLimiter } = require('../middleware/rateLimit');
 const { analyseSentence } = require('../services/sentenceAnalysis');
 const { AiUnavailableError } = require('../services/ai');
-const { nextStreak } = require('../services/streak');
-const { todayStr } = require('../utils/date');
+const { nextStreak, effectiveStreak } = require('../services/streak');
+const { todayStr, addDays, nextDayStartISO } = require('../utils/date');
 const { ok, fail, asyncHandler, isUuid, requireUuidParam } = require('../utils/http');
 const { serializeSubmission } = require('./serializers');
 
@@ -22,11 +22,30 @@ const learningAids = [
   { model: Grammar, as: 'grammars', attributes: ['id', 'pattern', 'explanation', 'example'] },
 ];
 
-// GET /dashboard/today — all of today's scenes, each with the user's status.
+// One scene in the learner-facing shape used by /today and /scene/:id.
 // The reference description is the AI's ground truth, so it is only revealed
 // after the learner has submitted for that scene.
+function sceneItem(scene, sub) {
+  const video = {
+    video_id:         scene.id,
+    video_url:        scene.youtube_url,
+    title:            scene.title,
+    difficulty:       scene.difficulty,
+    date:             scene.publish_date,
+    vocabularies:     scene.vocabularies,
+    grammars:         scene.grammars,
+    // Notes are learner-facing hints; the description is the answer key.
+    additional_notes: scene.additional_notes,
+    description:      sub ? scene.description : null,
+  };
+  if (!sub) return { status: 'pending', video };
+  return { status: 'submitted', video, submission: serializeSubmission(sub) };
+}
+
+// GET /dashboard/today — all of today's scenes, each with the user's status.
 router.get('/today', authenticate, asyncHandler(async (req, res) => {
   const today = todayStr();
+  const meta = { date: today, next_scene_at: nextDayStartISO(), current_streak: effectiveStreak(req.user, today) };
   const scenes = await Scene.findAll({
     where: { publish_date: today },
     order: [['scene_order', 'ASC'], ['createdAt', 'ASC']],
@@ -34,7 +53,7 @@ router.get('/today', authenticate, asyncHandler(async (req, res) => {
   });
 
   if (!scenes.length) {
-    return fail(res, 404, 'NO_SCENE', 'No scene available for today', { date: today });
+    return fail(res, 404, 'NO_SCENE', 'No scene available for today', meta);
   }
 
   const submissions = await Submission.findAll({
@@ -42,24 +61,42 @@ router.get('/today', authenticate, asyncHandler(async (req, res) => {
   });
   const submissionMap = new Map(submissions.map(s => [s.scene_id, s]));
 
-  const result = scenes.map(scene => {
-    const sub = submissionMap.get(scene.id);
-    const video = {
-      video_id:         scene.id,
-      video_url:        scene.youtube_url,
-      title:            scene.title,
-      difficulty:       scene.difficulty,
-      vocabularies:     scene.vocabularies,
-      grammars:         scene.grammars,
-      // Notes are learner-facing hints; the description is the answer key.
-      additional_notes: scene.additional_notes,
-      description:      sub ? scene.description : null,
-    };
-    if (!sub) return { status: 'pending', video };
-    return { status: 'submitted', video, submission: serializeSubmission(sub) };
-  });
+  return ok(res, { ...meta, scenes: scenes.map(scene => sceneItem(scene, submissionMap.get(scene.id))) });
+}));
 
-  return ok(res, { date: today, scenes: result });
+// GET /dashboard/catch-up — recent past scenes the learner hasn't answered yet
+// (past scenes can still be answered and scored), newest first.
+const CATCH_UP_DAYS = 30;
+const CATCH_UP_LIMIT = 6;
+router.get('/catch-up', authenticate, asyncHandler(async (req, res) => {
+  const today = todayStr();
+  const done = await Submission.findAll({
+    attributes: ['scene_id'], where: { user_id: req.user.id, status: 'completed' }, raw: true,
+  });
+  const scenes = await Scene.findAll({
+    where: {
+      publish_date: { [Op.lt]: today, [Op.gte]: addDays(today, -CATCH_UP_DAYS) },
+      ...(done.length ? { id: { [Op.notIn]: done.map(d => d.scene_id) } } : {}),
+    },
+    order: [['publish_date', 'DESC'], ['scene_order', 'ASC']],
+    limit: CATCH_UP_LIMIT,
+  });
+  return ok(res, {
+    scenes: scenes.map(s => ({
+      video_id: s.id, title: s.title, difficulty: s.difficulty, date: s.publish_date, video_url: s.youtube_url,
+    })),
+  });
+}));
+
+// GET /dashboard/scene/:id — one released scene (today's or past) with the learner's status.
+router.get('/scene/:id', authenticate, requireUuidParam('id', 'SCENE_NOT_FOUND', 'Scene not found'), asyncHandler(async (req, res) => {
+  const scene = await Scene.findOne({
+    where: { id: req.params.id, publish_date: { [Op.lte]: todayStr() } },
+    include: learningAids,
+  });
+  if (!scene) return fail(res, 404, 'SCENE_NOT_FOUND', 'Scene not found');
+  const sub = await Submission.findOne({ where: { user_id: req.user.id, scene_id: scene.id, status: 'completed' } });
+  return ok(res, { scenes: [sceneItem(scene, sub)] });
 }));
 
 // Claim the (user, scene) slot inside a short row-locked transaction so two

@@ -1,4 +1,5 @@
 import { NavLink, useNavigate } from 'react-router-dom'
+import { LogoMark, Wordmark } from './Logo.jsx'
 
 const Icon = {
   today: <path d="M4 5h16v14H4zM4 9h16M9 3v4M15 3v4" />,
@@ -36,7 +37,8 @@ export default function Navbar({ user, onLogout }) {
       <header className="navbar">
         <div className="navbar-inner">
           <NavLink to="/" className="navbar-logo" aria-label="SceneScribe home">
-            <span className="logo-scene">Scene</span><span className="logo-scribe">scribe</span>
+            <LogoMark size={30} />
+            <Wordmark />
           </NavLink>
 
           <nav className="navbar-links" aria-label="Main">
