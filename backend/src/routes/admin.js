@@ -6,6 +6,7 @@ const { env } = require('../config/env');
 const { todayStr, addDays, dateInAppTz } = require('../utils/date');
 const { effectiveStreak } = require('../services/streak');
 const { emailConfigured } = require('../services/email');
+const { planOf, grantPro } = require('../services/entitlements');
 const { ok, fail, asyncHandler, isDateString, requireUuidParam } = require('../utils/http');
 
 const router = express.Router();
@@ -324,7 +325,44 @@ router.get('/learners', asyncHandler(async (req, res) => {
     current_streak: effectiveStreak(u, today),
     scenes:         u.total_completed || 0,
     debates:        debatesBy.get(u.id) || 0,
+    plan:           planOf(u),
+    is_owner:       Boolean(env.ADMIN_EMAIL) && u.email === env.ADMIN_EMAIL,
   })), 200, { meta: { total: count, page, pages: Math.ceil(count / limit) } });
+}));
+
+const learnerId = requireUuidParam('id', 'NOT_FOUND', 'Learner not found');
+
+// POST /admin/learners/:id/pro { days } — grant Pro for N days (1–3650); days 0 revokes.
+// For college pilots, creators and support fixes. Paid subscriptions are not cancelled here.
+router.post('/learners/:id/pro', learnerId, asyncHandler(async (req, res) => {
+  const days = parseInt(req.body.days, 10);
+  if (!Number.isInteger(days) || days < 0 || days > 3650) return fail(res, 400, 'INVALID_INPUT', 'days must be 0–3650');
+  const user = await User.findByPk(req.params.id);
+  if (!user || !user.is_registered) return fail(res, 404, 'NOT_FOUND', 'Learner not found');
+  if (days === 0) {
+    if (user.pro_source === 'razorpay' && user.rzp_status === 'active') {
+      return fail(res, 409, 'HAS_SUBSCRIPTION', 'This learner pays by subscription. Cancel it in Razorpay instead.');
+    }
+    await user.update({ pro_until: null, pro_source: null }, { hooks: false });
+  } else {
+    await grantPro(user, new Date(Date.now() + days * 864e5), user.pro_source === 'razorpay' ? 'razorpay' : 'admin');
+  }
+  return ok(res, { id: user.id, plan: planOf(user) });
+}));
+
+// PATCH /admin/learners/:id { is_admin } — add or remove a content admin.
+router.patch('/learners/:id', learnerId, asyncHandler(async (req, res) => {
+  if (typeof req.body.is_admin !== 'boolean') return fail(res, 400, 'INVALID_INPUT', 'is_admin must be true or false');
+  const user = await User.findByPk(req.params.id);
+  if (!user || !user.is_registered) return fail(res, 404, 'NOT_FOUND', 'Learner not found');
+  if (!req.body.is_admin) {
+    if (user.id === req.user.id) return fail(res, 409, 'CANNOT_DEMOTE_SELF', "You can't remove your own admin access.");
+    if (env.ADMIN_EMAIL && user.email === env.ADMIN_EMAIL) {
+      return fail(res, 409, 'OWNER_ADMIN', 'This is the owner account set by ADMIN_EMAIL; it stays an admin.');
+    }
+  }
+  await user.update({ is_admin: req.body.is_admin }, { hooks: false });
+  return ok(res, { id: user.id, is_admin: user.is_admin });
 }));
 
 module.exports = router;

@@ -440,7 +440,44 @@ function Schedule({ scenes, today, runway, planDate, setPlanDate, reload }) {
 }
 
 // ── Learners ────────────────────────────────────────────────────────────────
+function LearnerActions({ u, onDone }) {
+  const [busy, setBusy] = useState('')
+  const [err, setErr] = useState('')
+  const run = async (key, fn) => {
+    setBusy(key); setErr('')
+    try { await fn(); onDone() } catch (e) { setErr(e.message) } finally { setBusy('') }
+  }
+  const pro = (days) => run(`pro${days}`, () => api.post(`/admin/learners/${u.id}/pro`, { days }))
+  const role = (is_admin) => run('role', () => api.patch(`/admin/learners/${u.id}`, { is_admin }))
+  return (
+    <div className="learner-actions">
+      <div className="learner-actions-group">
+        <span className="learner-actions-label">Pro access</span>
+        <button type="button" className="action-btn" disabled={!!busy} onClick={() => pro(30)}>+30 days</button>
+        <button type="button" className="action-btn" disabled={!!busy} onClick={() => pro(365)}>+1 year</button>
+        {u.plan?.pro && u.plan?.source === 'admin' && <button type="button" className="action-btn action-btn--del" disabled={!!busy} onClick={() => pro(0)}>Revoke</button>}
+      </div>
+      <div className="learner-actions-group">
+        <span className="learner-actions-label">Role</span>
+        {u.is_admin
+          ? (!u.is_owner && <button type="button" className="action-btn action-btn--del" disabled={!!busy} onClick={() => role(false)}>Remove admin</button>)
+          : <button type="button" className="action-btn" disabled={!!busy} onClick={() => role(true)}>Make admin</button>}
+        {u.is_owner && <span className="muted small">Owner (set by ADMIN_EMAIL)</span>}
+      </div>
+      {err && <div className="error-msg" role="alert">{err}</div>}
+    </div>
+  )
+}
+
+function planLabel(plan) {
+  if (!plan?.premium_enabled) return { text: 'Beta', cls: '' }
+  if (!plan.pro) return { text: 'Free', cls: '' }
+  if (plan.source === 'staff') return { text: 'Staff', cls: '' }
+  return { text: plan.source === 'admin' ? 'Pro · granted' : 'Pro', cls: ' mini-badge--pro' }
+}
+
 function Learners() {
+  const [open, setOpen] = useState(null)
   const [q, setQ] = useState('')
   const [query, setQuery] = useState('')
   const [page, setPage] = useState(1)
@@ -474,6 +511,7 @@ function Learners() {
           <div className="learner-row learner-row--head" role="row">
             <span role="columnheader">Learner</span><span role="columnheader">Joined</span><span role="columnheader">Last practice</span>
             <span role="columnheader">Streak</span><span role="columnheader">Scenes</span><span role="columnheader">Debates</span>
+            <span role="columnheader">Plan</span>
           </div>
           {state.rows.map(u => (
             <div key={u.id} className="learner-row" role="row">
@@ -492,6 +530,12 @@ function Learners() {
               <span role="cell" data-label="Streak">{u.current_streak ? `🔥 ${u.current_streak}` : '—'}</span>
               <span role="cell" data-label="Scenes">{u.scenes}</span>
               <span role="cell" data-label="Debates">{u.debates}</span>
+              <span role="cell" data-label="Plan" className="learner-plan">
+                <span className={`mini-badge${planLabel(u.plan).cls}`}>{planLabel(u.plan).text}</span>
+                <button type="button" className="action-btn learner-manage" aria-expanded={open === u.id}
+                  onClick={() => setOpen(open === u.id ? null : u.id)}>{open === u.id ? 'Close' : 'Manage'}</button>
+              </span>
+              {open === u.id && <LearnerActions u={u} onDone={load} />}
             </div>
           ))}
         </div>

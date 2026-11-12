@@ -9,6 +9,8 @@ const D = require('../services/debate');
 const TOPICS = require('../data/debateTopics');
 const { ok, fail, asyncHandler, requireUuidParam } = require('../utils/http');
 
+const { debateAllowance } = require('../services/entitlements');
+
 const router = express.Router();
 router.use(authenticate);
 
@@ -112,6 +114,11 @@ router.post('/', aiLimiter, asyncHandler(async (req, res) => {
   if (!SIDES.includes(side)) return fail(res, 400, 'INVALID_INPUT', 'side must be "for" or "against"');
   if (rounds < MIN_ROUNDS || rounds > MAX_ROUNDS) {
     return fail(res, 400, 'INVALID_INPUT', `rounds must be ${MIN_ROUNDS}–${MAX_ROUNDS}`);
+  }
+
+  const blocked = await debateAllowance(req.user);
+  if (blocked) {
+    return fail(res, 402, 'PRO_REQUIRED', `Free plan includes ${blocked.limit} debate${blocked.limit === 1 ? '' : 's'} a week. Upgrade to Pro for unlimited debates.`, { feature: 'debates', ...blocked });
   }
 
   let debate = await Debate.create({

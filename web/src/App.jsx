@@ -13,6 +13,7 @@ import { disableGoogleAutoSelect } from './auth/google.js'
 // Route-level code splitting: the debate engine and admin panel aren't needed
 // for the first paint of the daily scene.
 const Feedback = lazy(() => import('./pages/Feedback.jsx'))
+const Pricing = lazy(() => import('./pages/Pricing.jsx'))
 const ScenePage = lazy(() => import('./pages/ScenePage.jsx'))
 const Profile = lazy(() => import('./pages/Profile.jsx'))
 const Admin = lazy(() => import('./pages/Admin.jsx'))
@@ -46,6 +47,8 @@ export default function App() {
     disableGoogleAutoSelect()
     setUser(null)
   }, [])
+
+  const refreshUser = useCallback(() => authService.me().then(fresh => { saveSession(fresh); setUser(fresh); return fresh }), [])
 
   // Any 401 from the API means the stored session is no longer valid.
   useEffect(() => {
@@ -82,6 +85,7 @@ export default function App() {
               <Route path="/debate" element={<RequireAuth user={user}><DebateHub /></RequireAuth>} />
               <Route path="/debate/:id/live" element={<RequireAuth user={user}><DebateArena /></RequireAuth>} />
               <Route path="/debate/:id" element={<RequireAuth user={user}><DebateReport /></RequireAuth>} />
+              <Route path="/pricing" element={<RequireAuth user={user}><Pricing user={user} onUserUpdate={refreshUser} /></RequireAuth>} />
               <Route path="/admin" element={<RequireAuth user={user} admin><Admin /></RequireAuth>} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>

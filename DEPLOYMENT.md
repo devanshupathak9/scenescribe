@@ -59,3 +59,11 @@ The frontend is complete; the backend has one function left to write.
 - **Rate limits** are in-memory — correct for one Railway replica. Use a shared store before scaling out.
 - **Speech** runs in the browser (Web Speech API): Chrome/Edge on desktop & Android, Safari on iOS. Other browsers fall back to typing.
 - **CI** (`.github/workflows/ci.yml`) runs the backend tests against Postgres, builds the web app and the API image on every PR.
+
+## Turning on Pro (Razorpay)
+
+1. Razorpay dashboard → Subscriptions → Plans: create a monthly plan (₹149) and a yearly plan (₹999). Note both `plan_…` ids.
+2. Account & Settings → API keys: generate a key pair (test mode first).
+3. Webhooks → add `https://<your-api>/api/billing/webhook`, choose all `subscription.*` events, set a secret.
+4. In Railway set `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, `RAZORPAY_PLAN_MONTHLY`, `RAZORPAY_PLAN_YEARLY`.
+5. Test with a test-mode key, then switch to live keys and set `PREMIUM_ENABLED=true`. Until then every learner keeps full access.

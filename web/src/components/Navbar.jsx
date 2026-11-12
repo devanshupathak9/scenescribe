@@ -45,6 +45,10 @@ export default function Navbar({ user, onLogout }) {
             {links.map(l => <NavLink key={l.to} to={l.to} end={l.end} className={cls}>{l.label}</NavLink>)}
           </nav>
 
+          {user?.plan?.premium_enabled && (user.plan.pro
+            ? <NavLink to="/pricing" className="pro-chip pro-chip--on" aria-label="Your Pro plan">PRO</NavLink>
+            : <NavLink to="/pricing" className="pro-chip">Go Pro</NavLink>)}
+
           <button type="button" className="btn-logout" onClick={handleLogout} aria-label="Sign out">
             <span className="btn-logout-text">Sign out</span>
             <span className="btn-logout-icon"><NavIcon name="logout" /></span>

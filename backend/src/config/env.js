@@ -43,6 +43,18 @@ const env = {
   // with ADMIN_PASSWORD, then remove it.
   ADMIN_RESET_PASSWORD: bool(process.env.ADMIN_RESET_PASSWORD, false),
 
+  // Premium. While PREMIUM_ENABLED is off every learner is treated as Pro
+  // ("founding beta"), so nothing is locked before billing is live.
+  PREMIUM_ENABLED: bool(process.env.PREMIUM_ENABLED, false),
+  FREE_DEBATES_PER_WEEK: parseInt(process.env.FREE_DEBATES_PER_WEEK, 10) || 1,
+  PRICE_MONTHLY_INR: parseInt(process.env.PRICE_MONTHLY_INR, 10) || 149,
+  PRICE_YEARLY_INR: parseInt(process.env.PRICE_YEARLY_INR, 10) || 999,
+  RAZORPAY_KEY_ID: (process.env.RAZORPAY_KEY_ID || '').trim(),
+  RAZORPAY_KEY_SECRET: (process.env.RAZORPAY_KEY_SECRET || '').trim(),
+  RAZORPAY_WEBHOOK_SECRET: (process.env.RAZORPAY_WEBHOOK_SECRET || '').trim(),
+  RAZORPAY_PLAN_MONTHLY: (process.env.RAZORPAY_PLAN_MONTHLY || '').trim(),
+  RAZORPAY_PLAN_YEARLY: (process.env.RAZORPAY_PLAN_YEARLY || '').trim(),
+
   // Sequelize `sync({ alter: true })` on boot. On by default because the project
   // has no migrations yet; set DB_SYNC_ALTER=false once you add them.
   DB_SYNC_ALTER: bool(process.env.DB_SYNC_ALTER, true),
@@ -51,6 +63,8 @@ const env = {
 };
 
 env.aiEnabled = Boolean(env.OPENAI_API_KEY);
+env.billingEnabled = Boolean(env.PREMIUM_ENABLED && env.RAZORPAY_KEY_ID && env.RAZORPAY_KEY_SECRET
+  && env.RAZORPAY_PLAN_MONTHLY && env.RAZORPAY_PLAN_YEARLY);
 
 function validateEnv() {
   const problems = [];
