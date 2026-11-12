@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../api.js'
 import { formatDate, plural } from '../lib/format.js'
-import { getYouTubeId, getYouTubeThumb } from '../lib/youtube.js'
+import { getYouTubeId, getYouTubeThumb, formatClip } from '../lib/youtube.js'
 import { usePageTitle } from '../lib/usePageTitle.js'
 import { LoadingState, ErrorState, EmptyState } from '../components/ui.jsx'
 
@@ -109,6 +109,10 @@ function SceneForm({ initial, submitLabel, onSubmit, onCancel }) {
         <input id={id('url')} className="field-input" type="url" inputMode="url" value={form.video_url} aria-invalid={!videoOk}
           onChange={e => set('video_url', e.target.value)} placeholder="https://www.youtube.com/watch?v=… or /shorts/…" />
         {!videoOk && <div className="field-error">Not a recognised YouTube link.</div>}
+        {videoOk && form.video_url && formatClip(form.video_url) && (
+          <div className="field-hint">Plays {formatClip(form.video_url)} of the video.</div>
+        )}
+        <div className="field-hint">Only part of a long video? Add <code>&amp;t=1m35s&amp;end=5m20s</code> to the link.</div>
         {videoOk && form.video_url && getYouTubeThumb(form.video_url) && (
           <img className="url-preview" src={getYouTubeThumb(form.video_url)} alt="Video thumbnail" onError={e => { e.currentTarget.style.display = 'none' }} />
         )}
