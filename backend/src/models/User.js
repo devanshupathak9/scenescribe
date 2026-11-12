@@ -81,6 +81,31 @@ const User = sequelize.define('User', {
     type: DataTypes.BOOLEAN,
     defaultValue: false,
   },
+  // Pro access runs until this instant. Set by Razorpay webhooks/verification
+  // or granted by an admin. Null = never had Pro.
+  pro_until: {
+    type: DataTypes.DATE,
+    allowNull: true,
+  },
+  // 'razorpay' | 'admin'
+  pro_source: {
+    type: DataTypes.STRING(16),
+    allowNull: true,
+  },
+  rzp_subscription_id: {
+    type: DataTypes.STRING(64),
+    allowNull: true,
+  },
+  // 'monthly' | 'yearly'
+  rzp_plan: {
+    type: DataTypes.STRING(16),
+    allowNull: true,
+  },
+  // Razorpay subscription status as last reported (created, active, halted, cancelled, completed…)
+  rzp_status: {
+    type: DataTypes.STRING(16),
+    allowNull: true,
+  },
 }, {
   hooks: {
     beforeCreate: async (user) => {
@@ -108,6 +133,7 @@ User.prototype.toPublic = function() {
     email: this.email,
     avatar_url: this.avatar_url || null,
     is_admin: this.is_admin,
+    plan: require('../services/entitlements').planOf(this),
   };
 };
 

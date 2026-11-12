@@ -6,6 +6,7 @@ import { isTtsSupported, warmUpVoices } from '../../lib/tts.js'
 import { formatDate } from '../../lib/format.js'
 import { usePageTitle } from '../../lib/usePageTitle.js'
 import { LoadingState, ErrorState } from '../../components/ui.jsx'
+import UpgradeSheet from '../../components/UpgradeSheet.jsx'
 
 const LEVELS = [
   { id: 'beginner', label: 'Beginner', sub: 'Simple words, slower AI' },
@@ -69,6 +70,7 @@ export default function DebateHub() {
   const [side, setSide] = useState('for')
   const [rounds, setRounds] = useState(3)
   const [starting, setStarting] = useState(false)
+  const [paywall, setPaywall] = useState(null)
   const [error, setError] = useState('')
 
   const load = () => {
@@ -96,7 +98,8 @@ export default function DebateHub() {
       const res = await api.post('/debate', { topic: motion, side, rounds, level }, { timeout: 45_000 })
       navigate(`/debate/${res.data.id}/live`, { state: { debate: res.data } })
     } catch (err) {
-      setError(err.message)
+      if (err.code === 'PRO_REQUIRED') setPaywall(err.details || {})
+      else setError(err.message)
       setStarting(false)
     }
   }
@@ -216,6 +219,7 @@ export default function DebateHub() {
       </section>
 
       <PastDebates />
+      {paywall && <UpgradeSheet details={paywall} onClose={() => setPaywall(null)} />}
     </div>
   )
 }

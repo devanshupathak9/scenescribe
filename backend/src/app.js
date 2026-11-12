@@ -33,6 +33,9 @@ function createApp() {
     maxAge: 86400,
   }));
 
+  // Razorpay signs the raw bytes, so this route must see the body before JSON parsing.
+  app.post('/api/billing/webhook', express.raw({ type: 'application/json', limit: '1mb' }), require('./routes/billing').webhook);
+
   app.use(express.json({ limit: '100kb' }));
 
   // Liveness + DB readiness for Railway's healthcheck.
@@ -52,6 +55,7 @@ function createApp() {
   app.use('/api/admin', require('./routes/admin'));
   app.use('/api/analyse', require('./routes/analyse'));
   app.use('/api/debate', require('./routes/debate'));
+  app.use('/api/billing', require('./routes/billing').router);
 
   app.use('/api', notFound);
   app.use(notFound);

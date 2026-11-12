@@ -77,6 +77,20 @@ Pronunciation is inferred from browser speech-recognition confidence — a proxy
 | GET | `/analytics` | `today`, totals, `active_today`/`active_7d`, `new_users_7d`, 14-day `activity[]`, 14-day `runway[]` + `first_gap`, `recent_activity[]` (scenes + debates), `system { ai_enabled, email_enabled, timezone }` |
 | GET | `/learners?q=&page=` | Registered learners (20/page, newest first), searchable by name, username or email; streak, scenes, debates, last practice |
 
+### Billing — `/api/billing`
+| Method | Path | Notes |
+|---|---|---|
+| GET | `/plans` | Public. `premium_enabled`, `checkout_enabled`, prices (INR), free limits |
+| GET | `/me` | The caller's `plan` (also on every `user` payload) |
+| POST | `/subscribe` | `{ plan: 'monthly' \| 'yearly' }` → `{ subscription_id, key_id, amount, prefill }` for Razorpay Checkout. `503 BILLING_DISABLED`, `409 ALREADY_PRO` |
+| POST | `/verify` | Checkout response `{ razorpay_payment_id, razorpay_subscription_id, razorpay_signature }`; checked against the subscription stored for this user → Pro |
+| POST | `/cancel` | Stops renewal; Pro lasts to the end of the paid period |
+| POST | `/webhook` | Razorpay → us. Raw body, `X-Razorpay-Signature`. `subscription.activated/charged/resumed` extend `pro_until`; `cancelled/halted/completed/paused` record status |
+
+`user.plan = { pro, source: 'beta'|'razorpay'|'admin'|'staff'|null, pro_until, plan, renews, premium_enabled }`. With `PREMIUM_ENABLED` off everyone is `pro: true, source: 'beta'`. Admins are always Pro. Free learners get `FREE_DEBATES_PER_WEEK` debates per rolling 7 days; past that `POST /debate` → `402 PRO_REQUIRED` with `details { feature, used, limit, resets_at }`.
+
+Admin: `POST /admin/learners/:id/pro { days }` (0 revokes a granted plan) · `PATCH /admin/learners/:id { is_admin }` (can't demote yourself or the `ADMIN_EMAIL` owner).
+
 ### Other
 - `POST /api/analyse/sentence` `{ sentence, video_id }` — practice scoring; nothing is saved.
 - `GET /api/health` — liveness + DB check (Railway healthcheck).

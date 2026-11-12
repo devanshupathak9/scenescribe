@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { api } from '../api.js'
 import { formatDate } from '../lib/format.js'
 import { getYouTubeThumb } from '../lib/youtube.js'
+import UpgradeSheet from './UpgradeSheet.jsx'
 
 // Same motion for everyone on a given day, so learners can compare notes.
 function pickDaily(topics, dateStr) {
@@ -18,6 +19,7 @@ export function DebateOfTheDay({ date, compact = false }) {
   const [topic, setTopic] = useState(null)
   const [starting, setStarting] = useState(null) // 'for' | 'against'
   const [error, setError] = useState('')
+  const [paywall, setPaywall] = useState(null)
 
   useEffect(() => {
     let live = true
@@ -33,7 +35,9 @@ export function DebateOfTheDay({ date, compact = false }) {
       const res = await api.post('/debate', { topic: topic.motion, side, rounds: 2, level: 'intermediate' }, { timeout: 45_000 })
       navigate(`/debate/${res.data.id}/live`, { state: { debate: res.data } })
     } catch (e) {
-      setError(e.message); setStarting(null)
+      if (e.code === 'PRO_REQUIRED') setPaywall(e.details || {})
+      else setError(e.message)
+      setStarting(null)
     }
   }
 
@@ -57,6 +61,7 @@ export function DebateOfTheDay({ date, compact = false }) {
       </div>
       {error && <div className="error-msg" role="alert">{error}</div>}
       <Link to="/debate" className="text-link dotd-more">Choose another topic →</Link>
+      {paywall && <UpgradeSheet details={paywall} onClose={() => setPaywall(null)} />}
     </section>
   )
 }
