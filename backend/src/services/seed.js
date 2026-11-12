@@ -37,8 +37,12 @@ async function seedAccounts() {
   if (env.ADMIN_EMAIL) {
     const existing = await User.findOne({ where: { email: env.ADMIN_EMAIL } });
     if (existing) {
-      if (!existing.is_admin) await existing.update({ is_admin: true }, { hooks: false });
-      console.log(`[seed] admin ${env.ADMIN_EMAIL} ensured`);
+      const updates = { is_admin: true, is_registered: true };
+      if (env.ADMIN_RESET_PASSWORD && env.ADMIN_PASSWORD.length >= 12) {
+        updates.password_hash = await bcrypt.hash(env.ADMIN_PASSWORD, 10);
+      }
+      await existing.update(updates, { hooks: false });
+      console.log(`[seed] admin ${env.ADMIN_EMAIL} ensured${updates.password_hash ? ' (password reset — remove ADMIN_RESET_PASSWORD now)' : ''}`);
     } else if (env.ADMIN_PASSWORD.length >= 12) {
       await upsertAccount({
         email: env.ADMIN_EMAIL,

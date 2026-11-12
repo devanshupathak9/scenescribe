@@ -1,7 +1,11 @@
 const express = require('express');
 const { Scene, Vocabulary, Grammar, Submission, User, Debate, sequelize } = require('../models');
 const { authenticate, requireAdmin } = require('../middleware/auth');
+const { Op } = require('sequelize');
 const { env } = require('../config/env');
+const { todayStr, addDays, dateInAppTz } = require('../utils/date');
+const { effectiveStreak } = require('../services/streak');
+const { emailConfigured } = require('../services/email');
 const { ok, fail, asyncHandler, isDateString, requireUuidParam } = require('../utils/http');
 
 const router = express.Router();
@@ -189,10 +193,22 @@ router.delete('/schedule/:id', requireUuidParam('id', 'NOT_FOUND', 'Scene not fo
   return ok(res, { video_id: scene.id }, 200, { message: 'Scene deleted' });
 }));
 
-// GET /admin/analytics
+const ACTIVITY_DAYS = 14;
+const RUNWAY_DAYS = 14;
+
+// GET /admin/analytics — overview for the admin dashboard
 router.get('/analytics', asyncHandler(async (req, res) => {
-  const [totalUsers, totalSubmissions, totalScenes, avgResult, totalDebates, recentSubmissions] = await Promise.all([
+  const today = todayStr();
+  const since = new Date(`${addDays(today, -(ACTIVITY_DAYS - 1))}T00:00:00Z`);
+  const weekAgo = new Date(Date.now() - 7 * 864e5);
+  const runwayEnd = addDays(today, RUNWAY_DAYS - 1);
+
+  const [
+    totalUsers, newUsers7d, totalSubmissions, totalScenes, avgResult, totalDebates,
+    recentSubs, recentDebates, upcoming, feedSubs, feedDebates,
+  ] = await Promise.all([
     User.count({ where: { is_registered: true } }),
+    User.count({ where: { is_registered: true, createdAt: { [Op.gte]: weekAgo } } }),
     Submission.count({ where: { status: 'completed' } }),
     Scene.count(),
     Submission.findOne({
@@ -201,29 +217,114 @@ router.get('/analytics', asyncHandler(async (req, res) => {
       raw: true,
     }),
     Debate.count({ where: { status: 'completed' } }),
+    Submission.findAll({ attributes: ['user_id', 'createdAt'], where: { status: 'completed', createdAt: { [Op.gte]: since } }, raw: true }),
+    Debate.findAll({ attributes: ['user_id', 'completed_at'], where: { status: 'completed', completed_at: { [Op.gte]: since } }, raw: true }),
+    Scene.findAll({ attributes: ['publish_date'], where: { publish_date: { [Op.between]: [today, runwayEnd] } }, raw: true }),
     Submission.findAll({
-      where: { status: 'completed' },
-      order: [['createdAt', 'DESC']],
-      limit: 10,
+      where: { status: 'completed' }, order: [['createdAt', 'DESC']], limit: 8,
       include: [{ model: User, attributes: ['username'] }, { model: Scene, attributes: ['title'] }],
+    }),
+    Debate.findAll({
+      where: { status: 'completed' }, order: [['completed_at', 'DESC']], limit: 8,
+      attributes: ['id', 'topic', 'overall_score', 'completed_at', 'user_id'],
+      include: [{ model: User, attributes: ['username'] }],
     }),
   ]);
 
+  // Daily activity (app timezone) and active learners.
+  const days = new Map(Array.from({ length: ACTIVITY_DAYS }, (_, i) => [addDays(today, i - ACTIVITY_DAYS + 1), { scenes: 0, debates: 0, learners: new Set() }]));
+  const weekStart = addDays(today, -6);
+  const active7 = new Set();
+  const activeToday = new Set();
+  const track = (kind, userId, instant) => {
+    const d = dateInAppTz(new Date(instant));
+    const bucket = days.get(d);
+    if (!bucket) return;
+    bucket[kind] += 1;
+    bucket.learners.add(userId);
+    if (d >= weekStart) active7.add(userId);
+    if (d === today) activeToday.add(userId);
+  };
+  recentSubs.forEach(s => track('scenes', s.user_id, s.createdAt));
+  recentDebates.forEach(d => track('debates', d.user_id, d.completed_at));
+
+  // Content runway: how many of the next days have at least one scene.
+  const perDay = upcoming.reduce((m, s) => m.set(s.publish_date, (m.get(s.publish_date) || 0) + 1), new Map());
+  const runway = Array.from({ length: RUNWAY_DAYS }, (_, i) => {
+    const date = addDays(today, i);
+    return { date, scenes: perDay.get(date) || 0 };
+  });
+  const firstGap = runway.find(d => !d.scenes)?.date || null;
+
+  const feed = [
+    ...feedSubs.map(s => ({
+      type: 'scene', id: s.id, username: s.User?.username, title: s.Scene?.title, score: s.score, max: 10, at: s.createdAt,
+    })),
+    ...feedDebates.map(d => ({
+      type: 'debate', id: d.id, username: d.User?.username, title: d.topic, score: d.overall_score, max: 100, at: d.completed_at,
+    })),
+  ].sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 10);
+
   return ok(res, {
+    today,
     total_users:        totalUsers,
+    new_users_7d:       newUsers7d,
+    active_today:       activeToday.size,
+    active_7d:          active7.size,
     total_submissions:  totalSubmissions,
     total_scenes:       totalScenes,
     total_debates:      totalDebates,
     average_score:      Number(avgResult?.avg_score || 0).toFixed(1),
-    ai_enabled:         env.aiEnabled,
-    recent_submissions: recentSubmissions.map(s => ({
-      id:          s.id,
-      username:    s.User?.username,
-      scene_title: s.Scene?.title,
-      score:       s.score,
-      date:        s.createdAt,
-    })),
+    activity: [...days].map(([date, b]) => ({ date, scenes: b.scenes, debates: b.debates, learners: b.learners.size })),
+    runway,
+    first_gap: firstGap,
+    recent_activity: feed,
+    system: {
+      ai_enabled:    env.aiEnabled,
+      email_enabled: emailConfigured,
+      timezone:      env.APP_TIMEZONE,
+    },
+    // Kept for older clients.
+    ai_enabled: env.aiEnabled,
   });
+}));
+
+// GET /admin/learners?q=&page= — registered learners, most recent first
+router.get('/learners', asyncHandler(async (req, res) => {
+  const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+  const limit = 20;
+  const q = typeof req.query.q === 'string' ? req.query.q.trim().slice(0, 100) : '';
+  const where = { is_registered: true };
+  if (q) {
+    const like = { [Op.iLike]: `%${q.replace(/[%_\\]/g, '\\$&')}%` };
+    where[Op.or] = [{ email: like }, { username: like }, { full_name: like }];
+  }
+  const { count, rows } = await User.findAndCountAll({
+    where, order: [['createdAt', 'DESC']], limit, offset: (page - 1) * limit,
+  });
+  const ids = rows.map(u => u.id);
+  const debateCounts = ids.length
+    ? await Debate.findAll({
+      attributes: ['user_id', [sequelize.fn('COUNT', sequelize.col('id')), 'n']],
+      where: { user_id: ids, status: 'completed' }, group: ['user_id'], raw: true,
+    })
+    : [];
+  const debatesBy = new Map(debateCounts.map(d => [d.user_id, Number(d.n)]));
+  const today = todayStr();
+
+  return ok(res, rows.map(u => ({
+    id:             u.id,
+    user_name:      u.username,
+    full_name:      u.full_name,
+    email:          u.email,
+    is_admin:       u.is_admin,
+    google:         Boolean(u.google_id),
+    joined_at:      u.createdAt,
+    last_practice:  u.last_submission_date,
+    current_streak: effectiveStreak(u, today),
+    scenes:         u.total_completed || 0,
+    debates:        debatesBy.get(u.id) || 0,
+  })), 200, { meta: { total: count, page, pages: Math.ceil(count / limit) } });
 }));
 
 module.exports = router;

@@ -66,6 +66,11 @@ describe('debate API', () => {
     expect(report.metrics.total_words).toBeGreaterThan(20);
     expect(report.metrics.filler_count).toBeGreaterThanOrEqual(1);
     expect(report.ended_early).toBe(false);
+    expect(Object.keys(report.scores)).toContain('sentence_structure');
+    expect(['learner', 'ai', 'draw']).toContain(report.verdict.winner);
+    expect(report.verdict.source).toBe('estimate');
+    expect(report.metrics.hesitation).toMatchObject({ repetitions: expect.any(Number), restarts: expect.any(Number) });
+    expect(report.metrics.sentences.linkers_used).toEqual(expect.any(Array));
 
     const list = await api().get('/api/debate').set(auth(token));
     expect(list.body.data[0]).toMatchObject({ id, status: 'completed' });

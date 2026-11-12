@@ -56,4 +56,4 @@ async function sendOTPEmail(to, otp, purpose = 'register') {
   });
 }
 
-module.exports = { sendOTPEmail };
+module.exports = { sendOTPEmail, emailConfigured: Boolean(smtpConfigured) };
