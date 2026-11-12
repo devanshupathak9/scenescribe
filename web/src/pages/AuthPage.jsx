@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { authService } from '../auth/authService.js'
 import GoogleSignInButton from '../components/GoogleSignInButton.jsx'
+import { LogoMark, Wordmark } from '../components/Logo.jsx'
 
 const OTP_LENGTH = 6
 const MIN_PASSWORD = 8
@@ -57,8 +58,8 @@ function LeftPanel() {
       <div className="ap-orb ap-orb-3" />
       <div className="ap-left-inner">
         <div className="ap-brand">
-          <div className="ap-brand-icon"><IconEnvelope size={18} color="white" /></div>
-          <span className="ap-brand-name"><span className="ap-scene">Scene</span><span className="ap-scribe">Scribe</span></span>
+          <LogoMark size={40} />
+          <span className="ap-brand-name"><Wordmark /></span>
         </div>
 
         <div className="ap-badge">✓&nbsp;&nbsp;AI English practice</div>

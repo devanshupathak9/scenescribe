@@ -1072,24 +1072,11 @@ h1, h2, h3, .syne { font-family: 'Syne', sans-serif; }
   margin-bottom: 36px;
 }
 
-.ap-brand-icon {
-  width: 40px;
-  height: 40px;
-  background: #e8ff47;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-
 .ap-brand-name {
   font-family: 'Syne', sans-serif;
   font-weight: 800;
   font-size: 20px;
 }
-.ap-scene  { color: #ededed; }
-.ap-scribe { color: #e8ff47; }
 
 .ap-badge {
   display: inline-flex;
@@ -1698,7 +1685,7 @@ h1, h2, h3, .syne { font-family: 'Syne', sans-serif; }
 
   /* Scale down elements that appear in the compact strip */
   .ap-brand       { margin-bottom: 16px; }
-  .ap-brand-icon  { width: 32px; height: 32px; }
+  .ap-brand .logo-mark { width: 32px; height: 32px; }
   .ap-brand-name  { font-size: 17px; }
   .ap-badge       { margin-bottom: 14px; font-size: 10px; padding: 4px 10px; }
   .ap-headline    { font-size: 26px; margin-bottom: 0; }
