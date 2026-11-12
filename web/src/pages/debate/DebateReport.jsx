@@ -7,7 +7,8 @@ import { usePageTitle } from '../../lib/usePageTitle.js'
 import { LoadingState, ErrorState, ScoreRing, EstimateNotice } from '../../components/ui.jsx'
 
 const CATEGORIES = [
-  ['grammar', 'Grammar & structure'],
+  ['grammar', 'Grammar'],
+  ['sentence_structure', 'Sentence construction'],
   ['vocabulary', 'Vocabulary & word choice'],
   ['fluency', 'Fluency & pace'],
   ['pronunciation', 'Pronunciation & clarity'],
@@ -48,6 +49,126 @@ function Stat({ label, value, hint }) {
       <div className="metric-value">{value}</div>
       <div className="metric-label">{label}</div>
       {hint && <div className="metric-hint">{hint}</div>}
+    </div>
+  )
+}
+
+const AREA_LABEL = {
+  grammar: 'Grammar', sentence_structure: 'Sentences', vocabulary: 'Vocabulary', fluency: 'Fluency',
+  hesitation: 'Hesitation', pronunciation: 'Pronunciation', argument: 'Argument',
+}
+const WIN_TEXT = { learner: 'You won', ai: 'AI won', draw: 'Draw' }
+
+function Verdict({ v, userSide, aiSide }) {
+  const youLead = v.winner === 'learner'
+  return (
+    <section className={`card verdict verdict--${v.winner}`} aria-labelledby="verdict-h">
+      <div className="verdict-top">
+        <div>
+          <h2 id="verdict-h" className="section-label card-heading">Who made the stronger case</h2>
+          <div className="verdict-headline">
+            {v.winner === 'learner' ? 'You won this debate 🏆' : v.winner === 'ai' ? 'The AI edged it this time' : 'It was a draw'}
+          </div>
+          <p className="verdict-reason">{v.reason}</p>
+        </div>
+        <div className="scoreboard" aria-label={`Argument points: you ${v.learner_points}, AI ${v.ai_points}, out of 10`}>
+          <div className={`sb-side${youLead ? ' sb-side--lead' : ''}`}>
+            <span className="sb-name">You · {userSide}</span>
+            <span className="sb-pts">{v.learner_points}</span>
+          </div>
+          <span className="sb-dash" aria-hidden="true">–</span>
+          <div className={`sb-side${v.winner === 'ai' ? ' sb-side--lead' : ''}`}>
+            <span className="sb-name">AI · {aiSide}</span>
+            <span className="sb-pts">{v.ai_points}</span>
+          </div>
+          <span className="sb-note">argument points / 10</span>
+        </div>
+      </div>
+
+      {v.rounds?.length > 0 && (
+        <ol className="round-list">
+          {v.rounds.map(r => (
+            <li key={r.round} className="round-row">
+              <span className={`round-chip round-chip--${r.winner}`}>R{r.round} · {WIN_TEXT[r.winner]}</span>
+              <div className="round-points">
+                {r.learner_point && <div><span className="round-who">You</span>{r.learner_point}</div>}
+                {r.ai_point && <div><span className="round-who">AI</span>{r.ai_point}</div>}
+                {r.why && <div className="round-why">{r.why}</div>}
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+
+      {(v.strongest_point || v.missed_counter) && (
+        <div className="verdict-notes">
+          {v.strongest_point && <div className="verdict-note verdict-note--good"><strong>Your strongest point</strong>{v.strongest_point}</div>}
+          {v.missed_counter && <div className="verdict-note"><strong>Point you left unanswered</strong>{v.missed_counter}</div>}
+        </div>
+      )}
+      {v.source === 'estimate' && <p className="muted small verdict-est">Estimated from the reasons, examples and rebuttals in each turn.</p>}
+    </section>
+  )
+}
+
+function FocusAreas({ items }) {
+  return (
+    <section className="card section" aria-labelledby="focus-h">
+      <h2 id="focus-h" className="section-label card-heading">Where to improve your spoken English</h2>
+      <ol className="focus-list">
+        {items.map((f, i) => (
+          <li key={i} className="focus-item">
+            <span className="focus-num" aria-hidden="true">{i + 1}</span>
+            <div className="focus-body">
+              <div className="focus-title"><span className="tag">{AREA_LABEL[f.area] || f.area}</span> {f.issue}</div>
+              {f.example && <div className="focus-line"><span className="focus-k">You said</span><span className="correction-from">{f.example}</span></div>}
+              {f.fix && <div className="focus-line"><span className="focus-k">Try</span><span className="correction-to">{f.fix}</span> <SpeakButton text={f.fix} /></div>}
+              {f.drill && <div className="focus-drill">🎯 {f.drill}</div>}
+            </div>
+          </li>
+        ))}
+      </ol>
+    </section>
+  )
+}
+
+// Highlights the repeated words inside an example snippet.
+function MarkRepeats({ text }) {
+  const w = text.split(' ')
+  return w.map((x, i) => {
+    const rep = (i > 0 && w[i - 1] === x) || (i + 1 < w.length && w[i + 1] === x) ||
+      (i >= 2 && w[i - 2] === x) || (i + 2 < w.length && w[i + 2] === x)
+    return <span key={i} className={rep ? 'rep' : undefined}>{x}{i < w.length - 1 ? ' ' : ''}</span>
+  })
+}
+
+function Hesitation({ h }) {
+  const s = h.smoothness
+  const label = s == null ? 'Too little speech to measure' : s >= 80 ? 'Smooth' : s >= 60 ? 'A few stumbles' : 'Frequent stumbles'
+  return (
+    <div className="hes">
+      <div className="hes-head">
+        <span className="suggestions-sublabel">Stuttering & hesitation</span>
+        {s != null && <span className={`cat-score cat-score--${tone(s)}`}>{s}</span>}
+      </div>
+      {s != null && (
+        <div className="cat-track" role="progressbar" aria-valuenow={s} aria-valuemin={0} aria-valuemax={100} aria-label="Smoothness">
+          <div className={`cat-fill cat-fill--${tone(s)}`} style={{ width: `${s}%` }} />
+        </div>
+      )}
+      <div className="hes-label">{label} · {h.per_100_words} per 100 words</div>
+      <div className="hes-counts">
+        <span><strong>{h.repetitions}</strong> repeated words</span>
+        <span><strong>{h.restarts}</strong> restarts</span>
+        <span><strong>{h.fillers}</strong> fillers</span>
+        {h.long_pauses != null && <span><strong>{h.long_pauses}</strong> long pauses</span>}
+      </div>
+      {h.examples?.length > 0 && (
+        <ul className="hes-examples">
+          {h.examples.slice(0, 4).map((e, i) => <li key={i}>“…<MarkRepeats text={e.text} />…”</li>)}
+        </ul>
+      )}
+      <p className="muted small">Speech recognition hides some hesitations, so real counts may be a little higher. When you get stuck, pause silently instead of repeating.</p>
     </div>
   )
 }
@@ -153,6 +274,10 @@ export default function DebateReport() {
         <EstimateNotice>AI evaluation isn’t switched on yet, so this report is an automatic estimate from your transcript and speech statistics.</EstimateNotice>
       )}
 
+      {r.verdict && <Verdict v={r.verdict} userSide={debate.user_side.toUpperCase()} aiSide={debate.ai_side.toUpperCase()} />}
+
+      {r.focus_areas?.length > 0 && <FocusAreas items={r.focus_areas} />}
+
       <div className="report-grid">
         <section className="card" aria-labelledby="scores-h">
           <h2 id="scores-h" className="section-label card-heading">Your scores</h2>
@@ -169,6 +294,7 @@ export default function DebateReport() {
             <Stat label="Clarity" value={m.avg_confidence != null ? `${Math.round(m.avg_confidence * 100)}%` : '–'} hint="How clearly the recogniser heard you" />
             <Stat label="Word variety" value={m.vocabulary_variety != null ? `${Math.round(m.vocabulary_variety * 100)}%` : '–'} />
           </div>
+          {m.hesitation && <Hesitation h={m.hesitation} />}
           {m.unclear_words?.length > 0 && (
             <div className="unclear">
               <div className="suggestions-sublabel">Words to practise saying</div>

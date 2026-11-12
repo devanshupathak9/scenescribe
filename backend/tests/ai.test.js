@@ -55,9 +55,16 @@ describe('debate with AI', () => {
   const report = {
     cefr_level: 'B2', summary: 'Solid.',
     scores: {
-      grammar: { score: 70, comment: 'g' }, vocabulary: { score: 80, comment: 'v' }, fluency: { score: 60, comment: 'f' },
+      grammar: { score: 70, comment: 'g' }, sentence_structure: { score: 50, comment: 's' },
+      vocabulary: { score: 80, comment: 'v' }, fluency: { score: 60, comment: 'f' },
       pronunciation: { score: 75, comment: 'p' }, confidence: { score: 90, comment: 'c' },
     },
+    verdict: {
+      winner: 'ai', learner_points: 7.4, ai_points: 6, reason: 'r', // winner contradicts points on purpose
+      rounds: [{ round: 1, winner: 'learner', learner_point: 'a', ai_point: 'b', why: 'c' }, { round: 2, winner: 'ai', learner_point: 'a', ai_point: 'b', why: 'c' }, { round: 3, winner: 'ai', learner_point: '', ai_point: '', why: '' }],
+      strongest_point: 'free time', missed_counter: 'discipline',
+    },
+    focus_areas: [1, 2, 3, 4].map(i => ({ area: 'grammar', issue: `i${i}`, example: 'e', fix: 'f', drill: 'd' })),
     strengths: ['a'], improvements: ['b'],
     mistakes: [{ original: 'parents is', correction: 'parents are', explanation: 'plural', category: 'grammar' }],
     vocabulary_upgrades: [{ instead_of: 'good', try: 'beneficial', example: 'It is beneficial.' }],
@@ -87,7 +94,11 @@ describe('debate with AI', () => {
     expect(fin.status).toBe(200);
     const r = fin.body.data.report;
     expect(r.source).toBe('ai');
-    expect(r.overall_score).toBe(Math.round(70 * 0.22 + 80 * 0.2 + 60 * 0.2 + 75 * 0.13 + 90 * 0.25));
+    expect(r.overall_score).toBe(Math.round(70 * 0.18 + 50 * 0.14 + 80 * 0.16 + 60 * 0.18 + 75 * 0.12 + 90 * 0.22));
+    expect(r.verdict).toMatchObject({ winner: 'learner', learner_points: 7, ai_points: 6, source: 'ai' });
+    expect(r.verdict.rounds).toHaveLength(2);
+    expect(r.focus_areas).toHaveLength(3);
+    expect(r.metrics.hesitation).toHaveProperty('smoothness');
     expect(r.mistakes[0].correction).toBe('parents are');
   });
 

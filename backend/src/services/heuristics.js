@@ -98,4 +98,71 @@ function countFillers(text) {
   return n;
 }
 
-module.exports = { words, sentences, contentWords, detectIssues, tidySentence, estimateSceneFeedback, countFillers, clamp, FILLERS };
+
+// ── Spoken-English signals (debates) ────────────────────────────────────────
+// Browser speech recognition tidies up some hesitations before we see them, so
+// these are lower bounds, labelled as such in the UI.
+
+// Doubles that are correct English ("had had", "that that") are not stumbles.
+const OK_DOUBLES = new Set(['had', 'that', 'is', 'very', 'so', 'bye', 'no', 'ha', 'really', 'many', 'more', 'far', 'long', 'again']);
+const FILLER_SINGLE = new Set(FILLERS.filter(f => !f.includes(' ')));
+
+function disfluency(text) {
+  const w = words(text);
+  const examples = [];
+  let repetitions = 0;
+  let restarts = 0;
+  const snippet = (i, n) => w.slice(Math.max(0, i - 1), i + n + 1).join(' ');
+
+  for (let i = 1; i < w.length; i++) {
+    // "I I think", "the the"
+    if (w[i] === w[i - 1] && !OK_DOUBLES.has(w[i]) && !FILLER_SINGLE.has(w[i])) {
+      let end = i;
+      while (end + 1 < w.length && w[end + 1] === w[i]) end++; // "and and and" = one stumble
+      repetitions++;
+      if (examples.length < 6) examples.push({ kind: 'repetition', text: snippet(i - 1, end - i + 2) });
+      i = end;
+      continue;
+    }
+    // "I think I think", "we should we should" — a restarted phrase
+    if (i >= 3 && w[i] === w[i - 2] && w[i - 1] === w[i - 3] && w[i] !== w[i - 1]) {
+      restarts++;
+      if (examples.length < 6) examples.push({ kind: 'restart', text: snippet(i - 3, 4) });
+      i++;
+    }
+  }
+  return { repetitions, restarts, examples };
+}
+
+const LINKERS = ['because', 'so', 'however', 'although', 'therefore', 'but', 'which', 'while', 'whereas', 'since',
+  'for example', 'for instance', 'on the other hand', 'in addition', 'moreover', 'firstly', 'secondly', 'finally', 'in conclusion', 'unless', 'if'];
+
+// How sentences are built: which joining words appear and how varied they are.
+function sentenceSignals(text) {
+  const lower = ` ${words(text).join(' ')} `;
+  const used = LINKERS.filter(l => lower.includes(` ${l} `));
+  const and = (lower.match(/ and /g) || []).length;
+  const total = words(text).length;
+  return {
+    linkers_used: used,
+    linker_variety: used.length,
+    and_ratio: total ? Math.round((and / total) * 1000) / 10 : 0, // "and" per 100 words: run-on signal
+  };
+}
+
+// Argument-strength signals for the offline verdict.
+function argumentSignals(text) {
+  const lower = ` ${words(text).join(' ')} `;
+  const has = (list) => list.reduce((n, p) => n + (lower.split(` ${p} `).length - 1), 0);
+  return {
+    reasons: has(['because', 'since', 'so', 'therefore', 'this means']),
+    examples: has(['for example', 'for instance', 'such as', 'like when']) + (text.match(/\d+/g) || []).length,
+    rebuttals: has(['but', 'however', 'you said', 'my opponent', 'i disagree', 'that is not', 'although']),
+    words: words(text).length,
+  };
+}
+
+module.exports = {
+  words, sentences, contentWords, detectIssues, tidySentence, estimateSceneFeedback, countFillers, clamp, FILLERS,
+  disfluency, sentenceSignals, argumentSignals,
+};
