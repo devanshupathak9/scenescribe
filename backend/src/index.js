@@ -1,4 +1,9 @@
 process.env.TZ = 'UTC'; // Force UTC for all Date operations in this process
+
+// Prefer IPv4 when a hostname has both A and AAAA records. Several hosts
+// (Railway by default, Render) have no outbound IPv6, and SMTP servers such as
+// smtp.gmail.com resolve to IPv6 first, which fails with ENETUNREACH.
+require('dns').setDefaultResultOrder('ipv4first');
 const { env, validateEnv } = require('./config/env');
 
 const problems = validateEnv();

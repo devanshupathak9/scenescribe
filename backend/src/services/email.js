@@ -11,6 +11,10 @@ const transporter = smtpConfigured
       host: process.env.SMTP_HOST,
       port: parseInt(process.env.SMTP_PORT) || 587,
       secure: process.env.SMTP_PORT === '465',
+      // Fail fast: a stuck SMTP server must not hang the sign-up request.
+      connectionTimeout: 10_000,
+      greetingTimeout: 10_000,
+      socketTimeout: 20_000,
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
