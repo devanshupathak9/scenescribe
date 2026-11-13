@@ -1,5 +1,6 @@
 const express = require('express');
-const { Scene, Vocabulary, Grammar, Submission, User, Debate, sequelize } = require('../models');
+const { Scene, Vocabulary, Grammar, Submission, User, Debate, DebateTopic, sequelize } = require('../models');
+const { defaultTopics, serializeTopic, parseTopicInput } = require('../services/debateTopics');
 const { authenticate, requireAdmin } = require('../middleware/auth');
 const { Op } = require('sequelize');
 const { env } = require('../config/env');
@@ -363,6 +364,62 @@ router.patch('/learners/:id', learnerId, asyncHandler(async (req, res) => {
   }
   await user.update({ is_admin: req.body.is_admin }, { hooks: false });
   return ok(res, { id: user.id, is_admin: user.is_admin });
+}));
+
+// ── Debate topics ─────────────────────────────────────────────────────────────
+// While no topic is active, learners get the built-in list (data/debateTopics.js).
+
+const topicId = requireUuidParam('id', 'NOT_FOUND', 'Topic not found');
+const MAX_TOPICS = 300;
+
+// GET /admin/topics — the admin's topics plus the built-in defaults for reference
+router.get('/topics', asyncHandler(async (req, res) => {
+  const rows = await DebateTopic.findAll({ order: [['category', 'ASC'], ['createdAt', 'ASC']] });
+  const active = rows.filter(r => r.is_active).length;
+  return ok(res, {
+    topics: rows.map(serializeTopic),
+    defaults: defaultTopics(),
+    using_defaults: active === 0,
+  });
+}));
+
+// POST /admin/topics { motion, category?, level?, points_for?, points_against? }
+router.post('/topics', asyncHandler(async (req, res) => {
+  const { values, error } = parseTopicInput(req.body);
+  if (error) return fail(res, 400, 'INVALID_INPUT', error);
+  const dupe = await DebateTopic.findOne({ where: sequelize.where(sequelize.fn('lower', sequelize.col('motion')), values.motion.toLowerCase()) });
+  if (dupe) return fail(res, 409, 'DUPLICATE_TOPIC', 'That motion is already in your list.');
+  if (await DebateTopic.count() >= MAX_TOPICS) return fail(res, 409, 'TOO_MANY_TOPICS', `You can keep up to ${MAX_TOPICS} topics.`);
+  const topic = await DebateTopic.create(values);
+  return ok(res, serializeTopic(topic), 201);
+}));
+
+// POST /admin/topics/import-defaults — copy the built-in list in so it can be edited.
+// Skips motions that already exist, so it is safe to run twice.
+router.post('/topics/import-defaults', asyncHandler(async (req, res) => {
+  const existing = new Set((await DebateTopic.findAll({ attributes: ['motion'] })).map(t => t.motion.toLowerCase()));
+  const fresh = defaultTopics()
+    .filter(t => !existing.has(t.motion.toLowerCase()))
+    .map(({ id, ...t }) => t);
+  if (fresh.length) await DebateTopic.bulkCreate(fresh);
+  return ok(res, { imported: fresh.length }, 201);
+}));
+
+// PATCH /admin/topics/:id — any subset of the create fields, plus is_active
+router.patch('/topics/:id', topicId, asyncHandler(async (req, res) => {
+  const topic = await DebateTopic.findByPk(req.params.id);
+  if (!topic) return fail(res, 404, 'NOT_FOUND', 'Topic not found');
+  const { values, error } = parseTopicInput(req.body, { partial: true });
+  if (error) return fail(res, 400, 'INVALID_INPUT', error);
+  await topic.update(values);
+  return ok(res, serializeTopic(topic));
+}));
+
+// DELETE /admin/topics/:id
+router.delete('/topics/:id', topicId, asyncHandler(async (req, res) => {
+  const deleted = await DebateTopic.destroy({ where: { id: req.params.id } });
+  if (!deleted) return fail(res, 404, 'NOT_FOUND', 'Topic not found');
+  return ok(res, { id: req.params.id, deleted: true });
 }));
 
 module.exports = router;

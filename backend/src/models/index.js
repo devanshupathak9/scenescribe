@@ -5,6 +5,7 @@ const Vocabulary = require('./Vocabulary');
 const Grammar = require('./Grammar');
 const Submission = require('./Submission');
 const Debate = require('./Debate');
+const DebateTopic = require('./DebateTopic');
 
 // Associations
 Scene.hasMany(Vocabulary, { foreignKey: 'scene_id', as: 'vocabularies', onDelete: 'CASCADE', hooks: true });
@@ -22,4 +23,4 @@ Submission.belongsTo(Scene, { foreignKey: 'scene_id' });
 User.hasMany(Debate, { foreignKey: 'user_id', as: 'debates', onDelete: 'CASCADE' });
 Debate.belongsTo(User, { foreignKey: 'user_id' });
 
-module.exports = { sequelize, User, Scene, Vocabulary, Grammar, Submission, Debate };
+module.exports = { sequelize, User, Scene, Vocabulary, Grammar, Submission, Debate, DebateTopic };

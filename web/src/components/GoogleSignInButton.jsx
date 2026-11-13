@@ -45,9 +45,10 @@ export default function GoogleSignInButton({ onSuccess, onError, text = 'continu
         setState('ready')
       })
       .catch((err) => {
+        // Usually an ad blocker or a network hiccup — show a quiet note, not a form error.
         if (cancelled) return
+        console.warn('[google-signin]', err.message)
         setState('failed')
-        handlers.current.onError?.(err.message)
       })
 
     return () => { cancelled = true }
@@ -61,6 +62,9 @@ export default function GoogleSignInButton({ onSuccess, onError, text = 'continu
       {state === 'loading' && <div className="google-signin-placeholder" aria-hidden="true" />}
       {state === 'busy' && (
         <div className="google-signin-busy" role="status"><span className="spinner" /> Signing in with Google…</div>
+      )}
+      {state === 'failed' && (
+        <p className="google-signin-failed">Google sign-in couldn't load here (an ad blocker can cause this). You can still use email below.</p>
       )}
       <div className="ap-divider" role="separator"><span>or use email</span></div>
     </div>

@@ -108,6 +108,8 @@ export default function DebateHub() {
   if (!data) return <LoadingState label="Loading debate topics…" />
 
   const { turn_seconds: turnSec, transition_seconds: transSec, min_rounds: minR, max_rounds: maxR } = data.config
+  const selected = custom ? null : data.topics.find(t => t.motion === topic)
+  const myPoints = (side === 'for' ? selected?.points_for : selected?.points_against) || []
   const minutes = Math.ceil((rounds * 2 * (turnSec + transSec)) / 60)
   const speech = isSpeechSupported()
 
@@ -194,6 +196,13 @@ export default function DebateHub() {
               </button>
             ))}
           </div>
+          {myPoints.length > 0 && (
+            <div className="talking-points" aria-live="polite">
+              <div className="section-label">Ideas for your side</div>
+              <ul>{myPoints.map(p => <li key={p}>{p}</li>)}</ul>
+              <div className="field-hint">Use them as a starting point, then add your own examples.</div>
+            </div>
+          )}
         </fieldset>
 
         <fieldset className="setup-block">

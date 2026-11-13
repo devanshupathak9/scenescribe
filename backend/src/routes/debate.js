@@ -6,7 +6,7 @@ const { authenticate } = require('../middleware/auth');
 const { aiLimiter } = require('../middleware/rateLimit');
 const { AiUnavailableError } = require('../services/ai');
 const D = require('../services/debate');
-const TOPICS = require('../data/debateTopics');
+const { learnerTopics } = require('../services/debateTopics');
 const { ok, fail, asyncHandler, requireUuidParam } = require('../utils/http');
 
 const { debateAllowance } = require('../services/entitlements');
@@ -81,11 +81,11 @@ async function advanceAi(debate) {
   });
 }
 
-// GET /debate/topics — curated motions
-router.get('/topics', (req, res) => ok(res, {
-  topics: TOPICS,
+// GET /debate/topics — the admin's motions, or the built-in set when there are none
+router.get('/topics', asyncHandler(async (req, res) => ok(res, {
+  ...(await learnerTopics()),
   config: { turn_seconds: TURN_SECONDS, transition_seconds: TRANSITION_SECONDS, min_rounds: MIN_ROUNDS, max_rounds: MAX_ROUNDS },
-}));
+})));
 
 // GET /debate — the user's completed debates, newest first
 router.get('/', asyncHandler(async (req, res) => {

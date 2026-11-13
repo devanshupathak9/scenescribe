@@ -38,14 +38,17 @@ The server **refuses to start** in production with a weak `JWT_SECRET`, without 
 4. Deploy. `VITE_*` values are baked in at build time — **redeploy after changing them**.
 5. Add the Vercel URL to Railway's `CORS_ORIGIN` if you hadn't yet.
 
-## 3. Google sign-in (optional)
+## 3. Google sign-in (optional, free)
 
-The frontend is complete; the backend has one function left to write.
+Fully implemented; it switches on when both variables are set.
 
-1. Google Cloud Console → **APIs & Services → Credentials → Create OAuth client ID → Web application**.
-2. **Authorised JavaScript origins**: your Vercel domain(s) and `http://localhost:5173`. (No redirect URI needed — popup mode.)
-3. Set `VITE_GOOGLE_CLIENT_ID` on Vercel and `GOOGLE_CLIENT_ID` on Railway (same value).
-4. Implement `verifyGoogleIdToken()` in `backend/src/services/googleAuth.js` — the file contains the exact code. Until then the button shows and `POST /api/auth/google` answers `501 GOOGLE_AUTH_NOT_CONFIGURED` with a friendly message.
+1. [Google Cloud Console](https://console.cloud.google.com/) → create (or pick) a project.
+2. **Google Auth Platform → Branding / OAuth consent screen**: app name, support email, logo, home page `https://scenescribe.in`, privacy/terms links, authorised domain `scenescribe.in`. Audience **External**; scopes are only the defaults (`openid`, `email`, `profile`), so no Google verification review is needed. **Publish** the app (out of "Testing") so anyone can sign in.
+3. **Clients → Create client → Web application**. **Authorised JavaScript origins**: `https://scenescribe.in`, `https://www.scenescribe.in`, your `*.vercel.app` domain, `http://localhost:5173`. No redirect URI (popup mode).
+4. Copy the **Client ID** (`…apps.googleusercontent.com`; it is public, not a secret). There is no client secret to use.
+5. Set `VITE_GOOGLE_CLIENT_ID` on Vercel (then redeploy) and `GOOGLE_CLIENT_ID` on Railway — the same value.
+
+The backend verifies each Google ID token's signature, expiry and audience (`services/googleAuth.js`, google-auth-library), then signs in the account with that Google ID, links an existing account with the same verified email, or creates a new one. Without `GOOGLE_CLIENT_ID`, `POST /api/auth/google` answers `501 GOOGLE_AUTH_NOT_CONFIGURED`; without `VITE_GOOGLE_CLIENT_ID` the button is hidden.
 
 ## 4. After each deploy
 
