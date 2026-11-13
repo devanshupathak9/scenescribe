@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { authService } from '../auth/authService.js'
 import GoogleSignInButton from '../components/GoogleSignInButton.jsx'
 import { LogoMark, Wordmark } from '../components/Logo.jsx'
@@ -490,6 +491,9 @@ export default function AuthPage({ onLogin, initialTab = 'register' }) {
             </form>
           )}
 
+          <p className="ap-legal">
+            By continuing you agree to our <Link to="/terms">Terms</Link> and <Link to="/privacy">Privacy Policy</Link>.
+          </p>
         </div>
       </main>
     </div>
