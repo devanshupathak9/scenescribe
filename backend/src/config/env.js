@@ -43,6 +43,10 @@ const env = {
   // with ADMIN_PASSWORD, then remove it.
   ADMIN_RESET_PASSWORD: bool(process.env.ADMIN_RESET_PASSWORD, false),
 
+  // Google sign-in: a "Web application" OAuth client ID from Google Cloud.
+  // Same value as the web app's VITE_GOOGLE_CLIENT_ID. Empty = Google sign-in off.
+  GOOGLE_CLIENT_ID: (process.env.GOOGLE_CLIENT_ID || '').trim(),
+
   // Premium. While PREMIUM_ENABLED is off every learner is treated as Pro
   // ("founding beta"), so nothing is locked before billing is live.
   PREMIUM_ENABLED: bool(process.env.PREMIUM_ENABLED, false),

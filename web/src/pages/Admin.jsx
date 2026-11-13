@@ -5,10 +5,11 @@ import { formatDate, plural } from '../lib/format.js'
 import { getYouTubeId, getYouTubeThumb } from '../lib/youtube.js'
 import { usePageTitle } from '../lib/usePageTitle.js'
 import { LoadingState, ErrorState, EmptyState } from '../components/ui.jsx'
+import AdminTopics from './AdminTopics.jsx'
 
 const DIFFICULTIES = ['beginner', 'intermediate', 'advanced']
 const MAX_PER_DAY = 4
-const TABS = [['overview', 'Overview'], ['schedule', 'Schedule'], ['learners', 'Learners']]
+const TABS = [['overview', 'Overview'], ['schedule', 'Schedule'], ['topics', 'Topics'], ['learners', 'Learners']]
 // Validated against the card surface (dataviz palette check, dark mode).
 const SERIES = { scenes: { label: 'Scenes', color: '#879a12' }, debates: { label: 'Debates', color: '#7c6fef' } }
 
@@ -603,6 +604,7 @@ export default function Admin() {
         <Schedule scenes={scenes} today={analytics.today} runway={analytics.runway}
           planDate={planDate} setPlanDate={setPlanDate} reload={load} />
       )}
+      {tab === 'topics' && <AdminTopics />}
       {tab === 'learners' && <Learners />}
     </div>
   )

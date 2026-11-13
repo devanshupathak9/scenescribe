@@ -31,7 +31,7 @@ Deployment: see [`../DEPLOYMENT.md`](../DEPLOYMENT.md). Every variable is docume
 | POST | `/login` | `{ email, password }` | → `{ token, user }`. `USE_GOOGLE` for Google-only accounts |
 | POST | `/forgot` | `{ email }` | Always 200 (no account enumeration) |
 | POST | `/reset` | `{ email, otp, password }` | → `{ token, user }` |
-| POST | `/google` | `{ credential }` | Google ID token → `{ token, user }`. `501` until `services/googleAuth.js` is implemented |
+| POST | `/google` | `{ credential }` | Google ID token → `{ token, user }`. Signs in by Google ID, links a verified matching email, or creates the account. `401 GOOGLE_TOKEN_INVALID`, `403 GOOGLE_EMAIL_UNVERIFIED`, `501` without `GOOGLE_CLIENT_ID` |
 | GET | `/me` | — | Current user |
 
 `user = { id, user_name, full_name, email, avatar_url, is_admin }`. Emails are case-insensitive; passwords 8–128 chars; usernames `[A-Za-z0-9_.]{3,30}`.
@@ -55,7 +55,7 @@ Submission: `{ submission_id, response_text, input_type, score, breakdown: { gra
 ### Debate with AI — `/api/debate`
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/topics` | Curated motions + `config: { turn_seconds: 40, transition_seconds: 10, min_rounds: 2, max_rounds: 5 }` |
+| GET | `/topics` | `{ topics: [{ id, motion, category, level, points_for[], points_against[] }], source: 'custom'\|'default', config }`. Admin topics when any are active, else the built-in list. `config: { turn_seconds: 40, transition_seconds: 10, min_rounds: 2, max_rounds: 5 }` |
 | POST | `/` | `{ topic, side: 'for'\|'against', rounds, level }` → debate. FOR opens each round; if the AI is FOR its opening is included |
 | GET | `/` | Completed debates (paginated) |
 | GET | `/:id` | Debate with `turns[]`, `next_turn`, `report` |
@@ -75,6 +75,10 @@ Pronunciation is inferred from browser speech-recognition confidence — a proxy
 | PATCH | `/schedule/:id` | Any field above; passing `vocabularies`/`grammars` replaces the list |
 | DELETE | `/schedule/:id` | `409 SCENE_HAS_SUBMISSIONS` once learners have answered it |
 | GET | `/analytics` | `today`, totals, `active_today`/`active_7d`, `new_users_7d`, 14-day `activity[]`, 14-day `runway[]` + `first_gap`, `recent_activity[]` (scenes + debates), `system { ai_enabled, email_enabled, timezone }` |
+| GET | `/topics` | `{ topics[] (with is_active), defaults[], using_defaults }` |
+| POST | `/topics` | `{ motion (8–200), category?, level?, points_for?[], points_against?[] }` (≤6 points/side). `409 DUPLICATE_TOPIC` |
+| POST | `/topics/import-defaults` | Copies the built-in list in (skips existing) → `{ imported }` |
+| PATCH · DELETE | `/topics/:id` | Any create field plus `is_active`. Hide all → learners get the built-in list |
 | GET | `/learners?q=&page=` | Registered learners (20/page, newest first), searchable by name, username or email; streak, scenes, debates, last practice |
 
 ### Billing — `/api/billing`
