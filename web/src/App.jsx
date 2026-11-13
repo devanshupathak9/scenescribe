@@ -20,6 +20,8 @@ const Admin = lazy(() => import('./pages/Admin.jsx'))
 const DebateHub = lazy(() => import('./pages/debate/DebateHub.jsx'))
 const DebateArena = lazy(() => import('./pages/debate/DebateArena.jsx'))
 const DebateReport = lazy(() => import('./pages/debate/DebateReport.jsx'))
+const Privacy = lazy(() => import('./pages/Legal.jsx').then(m => ({ default: m.Privacy })))
+const Terms = lazy(() => import('./pages/Legal.jsx').then(m => ({ default: m.Terms })))
 
 function RequireAuth({ user, admin = false, children }) {
   const location = useLocation()
@@ -87,6 +89,8 @@ export default function App() {
               <Route path="/debate/:id" element={<RequireAuth user={user}><DebateReport /></RequireAuth>} />
               <Route path="/pricing" element={<RequireAuth user={user}><Pricing user={user} onUserUpdate={refreshUser} /></RequireAuth>} />
               <Route path="/admin" element={<RequireAuth user={user} admin><Admin /></RequireAuth>} />
+              <Route path="/privacy" element={<Privacy />} />
+              <Route path="/terms" element={<Terms />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>
