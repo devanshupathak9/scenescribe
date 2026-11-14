@@ -52,7 +52,7 @@ const env = {
   // REMINDER_DAILY_CAP keeps you under your mail provider's daily limit.
   REMINDERS_ENABLED: bool(process.env.REMINDERS_ENABLED, true),
   REMINDER_HOUR: Math.min(23, Math.max(0, parseInt(process.env.REMINDER_HOUR, 10) || 19)),
-  REMINDER_DAILY_CAP: Math.max(0, parseInt(process.env.REMINDER_DAILY_CAP, 10) || 400),
+  REMINDER_DAILY_CAP: Math.max(0, parseInt(process.env.REMINDER_DAILY_CAP, 10) || 300),
 
   // Google sign-in: a "Web application" OAuth client ID from Google Cloud.
   // Same value as the web app's VITE_GOOGLE_CLIENT_ID. Empty = Google sign-in off.
