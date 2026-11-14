@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 const { Op } = require('sequelize');
 const { User, sequelize } = require('../models');
 const { sendOTPEmail } = require('../services/email');
-const { issueSessionToken } = require('../services/tokens');
+const { issueSessionToken, verifyUnsubscribeToken } = require('../services/tokens');
 const { verifyGoogleIdToken } = require('../services/googleAuth');
 const { authenticate } = require('../middleware/auth');
 const { authLimiter, otpSendLimiter } = require('../middleware/rateLimit');
@@ -247,6 +247,22 @@ router.post('/google', authLimiter, asyncHandler(async (req, res) => {
 
 // ── GET /auth/me ──────────────────────────────────────────────────────────────
 // Lets the client validate a stored token and refresh the cached user on load.
+
+// POST /auth/unsubscribe { token } — one-click "turn off reminders" from an email.
+// Public on purpose: the signed token is the proof, and it can only opt out.
+router.post('/unsubscribe', authLimiter, asyncHandler(async (req, res) => {
+  const { token } = req.body || {};
+  let userId;
+  try {
+    if (typeof token !== 'string' || !token) throw new Error('missing');
+    userId = verifyUnsubscribeToken(token);
+  } catch {
+    return fail(res, 400, 'INVALID_TOKEN', 'This unsubscribe link is invalid. You can turn reminders off from your profile.');
+  }
+  const user = await User.findByPk(userId);
+  if (user) await user.update({ email_reminders: false }, { hooks: false });
+  return ok(res, { unsubscribed: true });
+}));
 
 router.get('/me', authenticate, (req, res) => ok(res, { user: req.user.toPublic() }));
 

@@ -15,6 +15,7 @@ if (problems.length) {
 const { sequelize } = require('./models');
 const { createApp } = require('./app');
 const { seedAccounts } = require('./services/seed');
+const { startReminderScheduler } = require('./services/reminders');
 
 async function start() {
   await sequelize.authenticate();
@@ -25,6 +26,8 @@ async function start() {
   const server = createApp().listen(env.PORT, () => {
     console.log(`[api] listening on :${env.PORT} (${env.NODE_ENV}, AI ${env.aiEnabled ? 'on' : 'off — using estimates'}, tz ${env.APP_TIMEZONE})`);
   });
+
+  startReminderScheduler();
 
   // Railway sends SIGTERM on redeploy: finish in-flight requests, then close the pool.
   const shutdown = (signal) => {

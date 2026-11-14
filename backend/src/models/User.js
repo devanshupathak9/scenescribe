@@ -77,6 +77,17 @@ const User = sequelize.define('User', {
     type: DataTypes.DATEONLY,
     allowNull: true,
   },
+  // Daily "your streak ends tonight" email. One-click unsubscribe sets this false.
+  email_reminders: {
+    type: DataTypes.BOOLEAN,
+    allowNull: false,
+    defaultValue: true,
+  },
+  // App-timezone date of the last reminder sent, so a day never gets two.
+  last_reminder_date: {
+    type: DataTypes.DATEONLY,
+    allowNull: true,
+  },
   is_admin: {
     type: DataTypes.BOOLEAN,
     defaultValue: false,
@@ -133,6 +144,8 @@ User.prototype.toPublic = function() {
     email: this.email,
     avatar_url: this.avatar_url || null,
     is_admin: this.is_admin,
+    has_password: Boolean(this.password_hash),
+    email_reminders: this.email_reminders !== false,
     plan: require('../services/entitlements').planOf(this),
   };
 };

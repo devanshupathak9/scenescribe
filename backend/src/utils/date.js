@@ -36,4 +36,9 @@ function nextDayStartISO(now = new Date()) {
   return new Date(guess.getTime() - tzOffsetMinutes(guess) * 60000).toISOString();
 }
 
-module.exports = { todayStr, dateInAppTz, addDays, nextDayStartISO };
+// Hour of day (0–23) in the app timezone.
+function hourInAppTz(date = new Date()) {
+  return Number(new Intl.DateTimeFormat('en-US', { timeZone: env.APP_TIMEZONE, hour: 'numeric', hourCycle: 'h23' }).format(date));
+}
+
+module.exports = { todayStr, dateInAppTz, addDays, nextDayStartISO, hourInAppTz };

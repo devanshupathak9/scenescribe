@@ -1,5 +1,6 @@
 const express = require('express');
-const { Submission, Scene, Debate, sequelize } = require('../models');
+const { Submission, Scene, Debate, User, sequelize } = require('../models');
+const { cancelSubscription } = require('../services/razorpay');
 const { authenticate } = require('../middleware/auth');
 const { effectiveStreak } = require('../services/streak');
 const { Op } = require('sequelize');
@@ -23,6 +24,43 @@ const SKILLS = [
 const MIN_PRACTICES_FOR_FOCUS = 3;
 
 const mean = (xs) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null);
+
+// PATCH /profile/settings { email_reminders }
+router.patch('/settings', asyncHandler(async (req, res) => {
+  const { email_reminders } = req.body || {};
+  if (typeof email_reminders !== 'boolean') {
+    return fail(res, 400, 'INVALID_INPUT', 'email_reminders must be true or false.');
+  }
+  await req.user.update({ email_reminders }, { hooks: false });
+  return ok(res, { user: req.user.toPublic() });
+}));
+
+// POST /profile/delete-account { confirm: "DELETE", password? }
+// Permanently removes the account and everything tied to it. Password users
+// must re-enter their password; Google-only users type DELETE.
+router.post('/delete-account', asyncHandler(async (req, res) => {
+  const user = req.user;
+  const { confirm, password } = req.body || {};
+  if (confirm !== 'DELETE') return fail(res, 400, 'CONFIRM_REQUIRED', 'Type DELETE to confirm.');
+  if (user.is_admin) return fail(res, 403, 'ADMIN_ACCOUNT', 'Admin accounts can’t be deleted from the app.');
+  if (user.password_hash && !(await user.validatePassword(password))) {
+    return fail(res, 401, 'WRONG_PASSWORD', 'That password isn’t right.');
+  }
+  // Stop future charges before the account (and its subscription id) disappears.
+  if (user.rzp_subscription_id && ['active', 'authenticated', 'pending'].includes(user.rzp_status)) {
+    try { await cancelSubscription(user.rzp_subscription_id); } catch (err) {
+      console.error('[delete-account] cancel failed:', err.message);
+      return fail(res, 502, 'CANCEL_FAILED', 'We couldn’t cancel your subscription. Please try again, or cancel it first from the Pricing page.');
+    }
+  }
+  await sequelize.transaction(async (t) => {
+    await Submission.destroy({ where: { user_id: user.id }, transaction: t });
+    await Debate.destroy({ where: { user_id: user.id }, transaction: t });
+    await User.destroy({ where: { id: user.id }, transaction: t });
+  });
+  console.log(`[account] deleted ${user.id}`);
+  return ok(res, { deleted: true });
+}));
 
 // GET /profile/me — user profile + stats, skill profile and recent activity
 router.get('/me', asyncHandler(async (req, res) => {

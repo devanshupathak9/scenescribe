@@ -32,6 +32,7 @@ Deployment: see [`../DEPLOYMENT.md`](../DEPLOYMENT.md). Every variable is docume
 | POST | `/forgot` | `{ email }` | Always 200 (no account enumeration) |
 | POST | `/reset` | `{ email, otp, password }` | → `{ token, user }` |
 | POST | `/google` | `{ credential }` | Google ID token → `{ token, user }`. Signs in by Google ID, links a verified matching email, or creates the account. `401 GOOGLE_TOKEN_INVALID`, `403 GOOGLE_EMAIL_UNVERIFIED`, `501` without `GOOGLE_CLIENT_ID` |
+| POST | `/unsubscribe` | Public. `{ token }` from a reminder email → turns `email_reminders` off. `400 INVALID_TOKEN` |
 | GET | `/me` | — | Current user |
 
 `user = { id, user_name, full_name, email, avatar_url, is_admin }`. Emails are case-insensitive; passwords 8–128 chars; usernames `[A-Za-z0-9_.]{3,30}`.
@@ -49,6 +50,8 @@ Submission: `{ submission_id, response_text, input_type, score, breakdown: { gra
 | Method | Path | Notes |
 |---|---|---|
 | GET | `/me` | `{ user, stats: { avg_score, highest_score, current_streak, longest_streak, total_completed, recent_scores[], debates_completed, debate_avg_score, debate_best_score } }` |
+| PATCH | `/settings` | `{ email_reminders: bool }` → `{ user }` |
+| POST | `/delete-account` | `{ confirm: "DELETE", password? }` (password required if the account has one). Deletes user, submissions, debates; cancels an active Razorpay subscription first. `403` for admins |
 | GET | `/history?page=` | 10 per page, `meta: { total, page, pages }` |
 | GET | `/history/:id` | Same shape as `/dashboard/result/:id` |
 

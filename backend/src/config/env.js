@@ -43,6 +43,17 @@ const env = {
   // with ADMIN_PASSWORD, then remove it.
   ADMIN_RESET_PASSWORD: bool(process.env.ADMIN_RESET_PASSWORD, false),
 
+  // Public web origin used in email links (unsubscribe, "practise now").
+  // Defaults to the first CORS origin.
+  WEB_URL: (process.env.WEB_URL || (process.env.CORS_ORIGIN || '').split(',')[0] || 'http://localhost:5173').trim().replace(/\/+$/, ''),
+
+  // Streak reminder emails: sent once a day from REMINDER_HOUR (app timezone)
+  // to learners whose streak is alive but who haven't practised yet today.
+  // REMINDER_DAILY_CAP keeps you under your mail provider's daily limit.
+  REMINDERS_ENABLED: bool(process.env.REMINDERS_ENABLED, true),
+  REMINDER_HOUR: Math.min(23, Math.max(0, parseInt(process.env.REMINDER_HOUR, 10) || 19)),
+  REMINDER_DAILY_CAP: Math.max(0, parseInt(process.env.REMINDER_DAILY_CAP, 10) || 300),
+
   // Google sign-in: a "Web application" OAuth client ID from Google Cloud.
   // Same value as the web app's VITE_GOOGLE_CLIENT_ID. Empty = Google sign-in off.
   GOOGLE_CLIENT_ID: (process.env.GOOGLE_CLIENT_ID || '').trim(),
