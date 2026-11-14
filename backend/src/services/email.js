@@ -60,4 +60,45 @@ async function sendOTPEmail(to, otp, purpose = 'register') {
   });
 }
 
-module.exports = { sendOTPEmail, emailConfigured: Boolean(smtpConfigured) };
+const escapeHtml = (s) => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+// "Your N-day streak ends tonight." Returns false when email isn't configured.
+async function sendStreakReminderEmail(to, { name, streak, practiseUrl, unsubscribeUrl }) {
+  const days = `${streak}-day`;
+  const subject = streak > 1 ? `Your ${days} streak ends tonight` : 'Keep your streak going today';
+  const hi = name ? `Hi ${name},` : 'Hi,';
+  const lead = streak > 1
+    ? `You've practised ${streak} days in a row. One short scene today keeps the streak alive.`
+    : 'You practised yesterday. Do one short scene today to start a streak.';
+
+  if (!smtpConfigured || !transporter) {
+    if (process.env.NODE_ENV !== 'test') console.log(`[EMAIL SERVICE] SMTP not configured — would send streak reminder to ${to} (${streak})`);
+    return false;
+  }
+
+  await transporter.sendMail({
+    from: process.env.EMAIL_FROM || process.env.SMTP_USER,
+    to,
+    subject,
+    headers: {
+      'List-Unsubscribe': `<${unsubscribeUrl}>`,
+    },
+    text: `${hi}\n\n${lead} It takes about 3 minutes.\n\nPractise now: ${practiseUrl}\n\n—\nDon't want these reminders? Turn them off: ${unsubscribeUrl}`,
+    html: `
+      <div style="font-family: -apple-system, Segoe UI, Roboto, sans-serif; max-width: 460px; margin: 0 auto; padding: 24px; color: #1a1a24;">
+        <p style="font-size: 15px; margin: 0 0 16px;">${escapeHtml(hi)}</p>
+        <div style="font-size: 40px; font-weight: 800; margin: 0 0 4px;">🔥 ${streak}</div>
+        <p style="font-size: 13px; color: #777; margin: 0 0 20px; text-transform: uppercase; letter-spacing: .06em;">day streak</p>
+        <p style="font-size: 16px; line-height: 1.5; margin: 0 0 24px;">${escapeHtml(lead)} It takes about 3 minutes.</p>
+        <a href="${practiseUrl}" style="display: inline-block; background: #e8ff47; color: #111; font-weight: 700; text-decoration: none; padding: 14px 26px; border-radius: 12px;">Practise now</a>
+        <p style="color: #999; font-size: 12px; margin-top: 32px; line-height: 1.5;">
+          You get this because daily reminders are on in SceneScribe.
+          <a href="${unsubscribeUrl}" style="color: #999;">Turn off reminders</a>
+        </p>
+      </div>
+    `,
+  });
+  return true;
+}
+
+module.exports = { sendOTPEmail, sendStreakReminderEmail, emailConfigured: Boolean(smtpConfigured) };

@@ -12,4 +12,16 @@ function verifySessionToken(token) {
   return jwt.verify(token, env.JWT_SECRET);
 }
 
-module.exports = { issueSessionToken, verifySessionToken };
+// Long-lived, single-purpose token for one-click email unsubscribe links.
+// It can only turn reminders off, so it never expires.
+function issueUnsubscribeToken(user) {
+  return jwt.sign({ sub: user.id, purpose: 'unsubscribe' }, env.JWT_SECRET);
+}
+
+function verifyUnsubscribeToken(token) {
+  const payload = jwt.verify(token, env.JWT_SECRET);
+  if (payload.purpose !== 'unsubscribe' || !payload.sub) throw new Error('wrong token purpose');
+  return payload.sub;
+}
+
+module.exports = { issueSessionToken, verifySessionToken, issueUnsubscribeToken, verifyUnsubscribeToken };

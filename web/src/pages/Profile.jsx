@@ -4,6 +4,7 @@ import { api } from '../api.js'
 import { formatDate, plural, scoreTone, TONE_COLOR } from '../lib/format.js'
 import { usePageTitle } from '../lib/usePageTitle.js'
 import { LoadingState, ErrorState, EmptyState } from '../components/ui.jsx'
+import AccountSettings from '../components/AccountSettings.jsx'
 
 const CEFR_NAME = { A1: 'Beginner', A2: 'Elementary', B1: 'Intermediate', B2: 'Upper-intermediate', C1: 'Advanced', C2: 'Proficient' }
 const SPEAKING_SKILLS = new Set(['fluency', 'pronunciation', 'confidence'])
@@ -148,7 +149,7 @@ function HistoryList({ onEmpty }) {
   )
 }
 
-export default function Profile({ user }) {
+export default function Profile({ user, onUserUpdate, onAccountDeleted }) {
   usePageTitle('Profile')
   const [profile, setProfile] = useState(null)
   const [error, setError] = useState('')
@@ -300,6 +301,8 @@ export default function Profile({ user }) {
             } />
           : <DebateHistory />}
       </section>
+
+      <AccountSettings user={user} onUserUpdate={onUserUpdate} onAccountDeleted={onAccountDeleted} />
     </div>
   )
 }

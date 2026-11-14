@@ -21,6 +21,7 @@ const DebateHub = lazy(() => import('./pages/debate/DebateHub.jsx'))
 const DebateArena = lazy(() => import('./pages/debate/DebateArena.jsx'))
 const DebateReport = lazy(() => import('./pages/debate/DebateReport.jsx'))
 const Privacy = lazy(() => import('./pages/Legal.jsx').then(m => ({ default: m.Privacy })))
+const Unsubscribe = lazy(() => import('./pages/Unsubscribe.jsx'))
 const Terms = lazy(() => import('./pages/Legal.jsx').then(m => ({ default: m.Terms })))
 
 function RequireAuth({ user, admin = false, children }) {
@@ -83,7 +84,7 @@ export default function App() {
 
               <Route path="/scene/:id" element={<RequireAuth user={user}><ScenePage /></RequireAuth>} />
               <Route path="/feedback/:id" element={<RequireAuth user={user}><Feedback /></RequireAuth>} />
-              <Route path="/profile" element={<RequireAuth user={user}><Profile user={user} /></RequireAuth>} />
+              <Route path="/profile" element={<RequireAuth user={user}><Profile user={user} onUserUpdate={refreshUser} onAccountDeleted={logout} /></RequireAuth>} />
               <Route path="/debate" element={<RequireAuth user={user}><DebateHub /></RequireAuth>} />
               <Route path="/debate/:id/live" element={<RequireAuth user={user}><DebateArena /></RequireAuth>} />
               <Route path="/debate/:id" element={<RequireAuth user={user}><DebateReport /></RequireAuth>} />
@@ -91,6 +92,7 @@ export default function App() {
               <Route path="/admin" element={<RequireAuth user={user} admin><Admin /></RequireAuth>} />
               <Route path="/privacy" element={<Privacy />} />
               <Route path="/terms" element={<Terms />} />
+              <Route path="/unsubscribe" element={<Unsubscribe />} />
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </Suspense>
