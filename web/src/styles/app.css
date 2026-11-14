@@ -931,3 +931,6 @@ select.field-input { appearance: none; background-image: linear-gradient(45deg, 
 .unsub-card { max-width: 480px; margin: 48px auto 0; text-align: center; display: grid; gap: 12px; justify-items: center; padding: 32px 24px; }
 .unsub-card h1 { margin: 0; font-size: 24px; }
 @media (max-width: 640px) { .setting-row { align-items: flex-start; } }
+/* Google's button iframe is a light document; on our dark page a mismatched
+   color-scheme makes the browser paint an opaque white box behind it. */
+.google-signin-slot { color-scheme: light; }
